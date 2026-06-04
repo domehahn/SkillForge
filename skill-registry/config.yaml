@@ -1,0 +1,39 @@
+server:
+  addr: ":8080"
+
+storage:
+  data_dir: "./data"
+  max_package_size_mb: 50
+  allowed_package_types:
+    - tgz
+    - zip
+
+database:
+  path: "./data/registry.db"
+
+auth:
+  enabled: false
+  tokens: []
+    # Example token configuration:
+    # - name: admin
+    #   token_env: SKILL_REGISTRY_ADMIN_TOKEN
+    #   scopes:
+    #     - read
+    #     - write
+    #     - delete
+    # - name: readonly
+    #   token_env: SKILL_REGISTRY_READ_TOKEN
+    #   scopes:
+    #     - read
+
+proxy:
+  enabled: false
+  upstreams: []
+
+validation:
+  blocked_extensions:
+    - ".exe"
+    - ".dll"
+    - ".so"
+    - ".dylib"
+    - ".bin"
