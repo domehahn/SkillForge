@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/skillforge/skill-registry/internal/auth"
@@ -44,7 +45,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/metadata", h.GetMetadata)
 
-		// Public read endpoints (may require auth based on config)
+		// Auth endpoints (no authentication required)
+		r.Post("/auth/login", h.Login)
+
+		// Public read endpoints (no auth required)
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware())
 			r.Get("/skills", h.ListSkills)
@@ -53,14 +57,22 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Get("/skills/{namespace}/{name}/versions/{version}/download", h.Download)
 		})
 
-		// Write endpoints (require auth)
+		// Token management endpoints (require auth)
+		r.Group(func(r chi.Router) {
+			r.Use(h.auth.Middleware("write"))
+			r.Post("/tokens", h.CreateToken)
+			r.Get("/tokens", h.ListTokens)
+			r.Delete("/tokens/{id}", h.RevokeToken)
+		})
+
+		// Write endpoints (require auth with write scope)
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware("write"))
 			r.Put("/skills/{namespace}/{name}/versions/{version}", h.Publish)
 			r.Post("/validate", h.Validate)
 		})
 
-		// Delete endpoints (require auth)
+		// Delete endpoints (require auth with delete scope)
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware("delete"))
 			r.Delete("/skills/{namespace}/{name}/versions/{version}", h.DeleteVersion)
@@ -322,6 +334,164 @@ func (h *Handler) Validate(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, status, result)
 }
 
+// Login handles user authentication
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Parse request body
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+
+	if err := ParseJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+
+	// Authenticate user
+	userRepo := h.auth.GetUserRepo()
+	user, err := userRepo.AuthenticateUser(ctx, req.Username, req.Password)
+	if err != nil {
+		h.logger.Warn("authentication failed", "username", req.Username, "error", err)
+		WriteError(w, http.StatusUnauthorized, "AUTH_FAILED", "Invalid username or password")
+		return
+	}
+
+	// Determine scopes based on role
+	scopes := []string{"read", "write"}
+	if user.Role == "admin" {
+		scopes = append(scopes, "delete")
+	}
+
+	// Create session token (valid for 30 days)
+	expiresIn := 30 * 24 * time.Hour
+	token, err := userRepo.CreateToken(ctx, user.ID, "login-session", scopes, &expiresIn)
+	if err != nil {
+		h.logger.Error("failed to create token", "error", err)
+		WriteError(w, http.StatusInternalServerError, "TOKEN_CREATION_FAILED", "Failed to create session token")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"token":      token.Token,
+		"user":       user.Username,
+		"role":       user.Role,
+		"scopes":     scopes,
+		"expires_at": token.ExpiresAt,
+	})
+}
+
+// CreateToken handles API token creation
+func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get authenticated user
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+		return
+	}
+
+	// Parse request
+	var req struct {
+		Name      string   `json:"name"`
+		Scopes    []string `json:"scopes"`
+		ExpiresIn *int64   `json:"expires_in,omitempty"` // seconds
+	}
+
+	if err := ParseJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+
+	// Validate scopes
+	allowedScopes := []string{"read", "write"}
+	if user.Role == "admin" {
+		allowedScopes = append(allowedScopes, "delete")
+	}
+	
+	for _, scope := range req.Scopes {
+		if !contains(allowedScopes, scope) {
+			WriteError(w, http.StatusForbidden, "INVALID_SCOPE", fmt.Sprintf("Scope '%s' not allowed for your role", scope))
+			return
+		}
+	}
+
+	// Calculate expiration
+	var expiresIn *time.Duration
+	if req.ExpiresIn != nil {
+		duration := time.Duration(*req.ExpiresIn) * time.Second
+		expiresIn = &duration
+	}
+
+	// Create token
+	userRepo := h.auth.GetUserRepo()
+	token, err := userRepo.CreateToken(ctx, user.ID, req.Name, req.Scopes, expiresIn)
+	if err != nil {
+		h.logger.Error("failed to create token", "error", err)
+		WriteError(w, http.StatusInternalServerError, "TOKEN_CREATION_FAILED", "Failed to create token")
+		return
+	}
+
+	WriteJSON(w, http.StatusCreated, token)
+}
+
+// ListTokens handles listing user's tokens
+func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get authenticated user
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+		return
+	}
+
+	// List tokens
+	userRepo := h.auth.GetUserRepo()
+	tokens, err := userRepo.ListTokens(ctx, user.ID)
+	if err != nil {
+		h.logger.Error("failed to list tokens", "error", err)
+		WriteError(w, http.StatusInternalServerError, "LIST_FAILED", "Failed to list tokens")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"tokens": tokens,
+	})
+}
+
+// RevokeToken handles token revocation
+func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	// Get authenticated user
+	user := auth.UserFromContext(ctx)
+	if user == nil {
+		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+		return
+	}
+
+	// Parse token ID
+	tokenIDStr := chi.URLParam(r, "id")
+	tokenID, err := strconv.ParseInt(tokenIDStr, 10, 64)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_TOKEN_ID", "Invalid token ID")
+		return
+	}
+
+	// Revoke token
+	userRepo := h.auth.GetUserRepo()
+	if err := userRepo.RevokeToken(ctx, tokenID, user.ID); err != nil {
+		h.logger.Error("failed to revoke token", "error", err)
+		WriteError(w, http.StatusInternalServerError, "REVOKE_FAILED", "Failed to revoke token")
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}
+
 // ServeStaticFiles serves the web UI if available
 func (h *Handler) ServeStaticFiles(r chi.Router) {
 	// Check if web/dist directory exists
@@ -349,4 +519,14 @@ func (h *Handler) ServeStaticFiles(r chi.Router) {
 		indexPath := filepath.Join(webDir, "index.html")
 		http.ServeFile(w, req, indexPath)
 	})
+}
+
+// Helper function to check if a slice contains a string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

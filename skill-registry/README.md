@@ -57,7 +57,14 @@ cd skill-registry
 # Mit docker-compose starten
 docker-compose up -d
 
+# Admin-User erstellen (einmalig)
+docker compose exec registry /app/skill-registry admin create-user \
+  --username admin \
+  --password admin123 \
+  --role admin
+
 # Registry läuft auf http://localhost:8080
+# Login via: skforge login (admin / admin123)
 ```
 
 ### 🐳 Docker (Standalone)
@@ -88,16 +95,29 @@ curl http://localhost:8080/healthz
 # Erwartet: {"status":"ok"}
 ```
 
-### Schritt 2: CLI einrichten
+### Schritt 2: CLI einrichten & Login
 
 ```bash
 # CLI ist bereits gebaut (./bin/skforge)
 # Optional: In PATH verschieben
 sudo mv ./bin/skforge /usr/local/bin/
 
-# Login (optional, wenn keine Auth konfiguriert)
+# Erstelle einen Admin-User (server-seitig, einmalig)
+./bin/skill-registry admin create-user \
+  --username admin \
+  --password admin123 \
+  --role admin
+
+# Login mit Username/Password
 skforge login
 # Registry URL: http://localhost:8080
+# Username: admin
+# Password: admin123
+# ✅ Login successful!
+```
+
+**Hinweis:** Bei aktivierter Auth (`SKILL_REGISTRY_AUTH_ENABLED=true`) ist Login erforderlich für `publish` und `delete`.
+Download und Search funktionieren immer ohne Login.
 # Token: (leer lassen wenn Auth deaktiviert)
 ```
 
@@ -275,8 +295,11 @@ SKILL_REGISTRY_DATA_DIR=/data \
 ### skforge CLI Befehle
 
 ```bash
-# Login konfigurieren
+# Login konfigurieren (Username/Password)
 skforge login
+# Registry URL: http://localhost:8080
+# Username: admin
+# Password: ****
 
 # Version anzeigen
 skforge version
@@ -284,21 +307,29 @@ skforge version
 # Skill validieren (vor dem Upload)
 skforge validate ./my-skill/
 
-# Skill publishen
+# Skill publishen (benötigt write scope)
 skforge publish ./my-skill/ \
   --namespace myteam \
   --name my-skill \
   --version 1.0.0 \
   --registry http://localhost:8080
 
-# Skills suchen
+# Skills suchen (öffentlich, kein Token benötigt)
 skforge search "keyword"
 
-# Skill-Info abrufen
+# Skill-Info abrufen (öffentlich, kein Token benötigt)
 skforge info namespace/skill-name
 
-# Skill installieren
+# Skill installieren (öffentlich, kein Token benötigt)
 skforge install namespace/skill-name@version
+
+# Skill löschen (benötigt delete scope)
+skforge delete namespace/skill-name@version
+
+# Token Management
+skforge token create --name "CI Token" --scopes write
+skforge token list
+skforge token revoke <token-id>
 
 # Hilfe anzeigen
 skforge --help
@@ -348,18 +379,10 @@ database:
   path: "./data/registry.db"
 
 auth:
-  enabled: true
-  tokens:
-    - name: admin
-      token_env: SKILL_REGISTRY_ADMIN_TOKEN
-      scopes:
-        - read
-        - write
-        - delete
-    - name: readonly
-      token_env: SKILL_REGISTRY_READ_TOKEN
-      scopes:
-        - read
+  enabled: true  # Set to true for production, false for development
+  # Note: User authentication is database-backed.
+  # Create initial admin user with:
+  #   ./bin/skill-registry admin create-user --username admin --password <pass> --role admin
 
 validation:
   blocked_extensions:
@@ -388,6 +411,50 @@ All configuration options can be overridden with environment variables:
 
 ```bash
 curl http://localhost:8080/healthz
+```
+
+### Authentication
+
+#### Login (Get Token)
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}'
+```
+
+Response:
+```json
+{
+  "token": "skt_...",
+  "user": "admin",
+  "role": "admin",
+  "scopes": ["read", "write", "delete"],
+  "expires_at": "2026-07-04T21:30:23Z"
+}
+```
+
+#### Create Token
+
+```bash
+curl -X POST http://localhost:8080/api/v1/tokens \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"CI Pipeline","scopes":["write"]}'
+```
+
+#### List Tokens
+
+```bash
+curl http://localhost:8080/api/v1/tokens \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+#### Revoke Token
+
+```bash
+curl -X DELETE http://localhost:8080/api/v1/tokens/1 \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### List Skills
@@ -504,8 +571,13 @@ sudo mv ./bin/skforge /usr/local/bin/
 
 ```bash
 skforge login
-# Enter registry URL and token when prompted
+# Registry URL: http://localhost:8080
+# Username: admin
+# Password: ****
+# ✅ Login successful!
 ```
+
+The token is automatically saved to `~/.skforge/config.yaml`.
 
 Or configure via environment variables:
 
@@ -780,11 +852,131 @@ The registry validates all uploaded packages:
 
 ### Authentication
 
-Token-based authentication with scope-based permissions:
+Die Registry unterstützt **User-basierte Authentifizierung** mit Token-Management:
 
-- **`read`** - List and download skills
-- **`write`** - Publish skills
-- **`delete`** - Delete skill versions
+#### 🔐 Setup (Initial Admin User)
+
+```bash
+# 1. Admin-User erstellen (server-seitig)
+docker compose exec registry /app/skill-registry admin create-user \
+  --username admin \
+  --password <sicheres-passwort> \
+  --role admin
+
+# Oder lokal (ohne Docker)
+./bin/skill-registry admin create-user \
+  --username admin \
+  --password admin123 \
+  --role admin \
+  --db ./data/registry.db
+```
+
+#### 👤 Login (Client)
+
+```bash
+# Via CLI
+skforge login
+# Registry URL: http://localhost:8080
+# Username: admin
+# Password: ****
+# ✅ Login successful!
+#    User: admin
+#    Role: admin
+#    Scopes: read, write, delete
+```
+
+Der Login-Token wird automatisch in `~/.skforge/config.yaml` gespeichert.
+
+#### 🎫 Token-Management
+
+**Token erstellen:**
+```bash
+# CI/CD Token (nur write)
+skforge token create --name "CI Pipeline" --scopes write
+
+# Developer Token (read + write)
+skforge token create --name "Dev Token" --scopes read,write
+
+# Admin Token (alle Rechte)
+skforge token create --name "Admin Token" --scopes read,write,delete
+
+# ✅ Token created successfully!
+#    Name: CI Pipeline
+#    Scopes: write
+#    Token: skt_abc123...
+#    
+# ⚠️  Save this token - it will only be shown once!
+```
+
+**Tokens auflisten:**
+```bash
+skforge token list
+# Tokens:
+# 
+#   ID: 1
+#   Name: CI Pipeline
+#   Scopes: write
+#   Status: active
+#   Created: 2026-06-04T12:00:00Z
+# 
+#   ID: 2
+#   Name: Dev Token
+#   Scopes: read, write
+#   Status: active
+#   Created: 2026-06-04T13:00:00Z
+```
+
+**Token widerrufen:**
+```bash
+skforge token revoke 1
+# ⚠️  Revoke token #1? (y/N): y
+# ✅ Token #1 revoked
+```
+
+#### 🔒 Scopes & Permissions
+
+| Scope | Berechtigung | Beispiel |
+|-------|-------------|---------|
+| `read` | Skills durchsuchen und herunterladen | `skforge search`, `skforge install` |
+| `write` | Skills hochladen | `skforge publish` |
+| `delete` | Skills löschen | `skforge delete` |
+
+**Rollen:**
+- **`user`**: Kann `read` und `write` Tokens erstellen
+- **`admin`**: Kann alle Tokens erstellen (inkl. `delete`)
+
+#### 🌐 Öffentlicher Zugriff
+
+**Download/Search ist immer öffentlich** (ohne Token):
+```bash
+# Funktioniert ohne Login
+curl http://localhost:8080/api/v1/skills
+skforge search
+skforge install default/skill@1.0.0
+```
+
+**Publish/Delete erfordern Token:**
+```bash
+# Benötigt Token mit write scope
+skforge publish ./my-skill
+
+# Benötigt Token mit delete scope
+skforge delete default/skill@1.0.0
+```
+
+#### 🔧 Auth aktivieren/deaktivieren
+
+```yaml
+# config.yaml
+auth:
+  enabled: true  # false = keine Auth (Entwicklung)
+```
+
+```yaml
+# docker-compose.yml
+environment:
+  - SKILL_REGISTRY_AUTH_ENABLED=true
+```
 
 ### Audit Logging
 
@@ -799,8 +991,9 @@ All write operations (publish, delete) are logged with:
 
 ### Prerequisites
 
-- Go 1.23 or higher
+- Go 1.25 or higher
 - SQLite 3
+- Node.js 20+ (for Web UI development)
 - Make (optional, for convenience)
 
 ### Building

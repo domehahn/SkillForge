@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"strings"
 )
@@ -9,20 +10,31 @@ import (
 type contextKey string
 
 const actorKey contextKey = "actor"
+const userKey contextKey = "user"
 const scopesKey contextKey = "scopes"
 
 // Authenticator handles token-based authentication
 type Authenticator struct {
 	enabled bool
-	tokens  map[string][]string // token -> scopes
+	userRepo *UserRepository
 }
 
 // NewAuthenticator creates a new authenticator
-func NewAuthenticator(enabled bool, tokens map[string][]string) *Authenticator {
+func NewAuthenticator(enabled bool, db *sql.DB) (*Authenticator, error) {
+	userRepo, err := NewUserRepository(db)
+	if err != nil {
+		return nil, err
+	}
+	
 	return &Authenticator{
 		enabled: enabled,
-		tokens:  tokens,
-	}
+		userRepo: userRepo,
+	}, nil
+}
+
+// GetUserRepo returns the user repository
+func (a *Authenticator) GetUserRepo() *UserRepository {
+	return a.userRepo
 }
 
 // Middleware returns an authentication middleware
@@ -44,8 +56,10 @@ func (a *Authenticator) Middleware(requiredScopes ...string) func(http.Handler) 
 					http.Error(w, `{"error": {"code": "UNAUTHORIZED", "message": "Missing authorization header"}}`, http.StatusUnauthorized)
 					return
 				}
-				// No auth required for this endpoint
-				next.ServeHTTP(w, r)
+				// No auth required for this endpoint (public read access)
+				ctx := context.WithValue(r.Context(), actorKey, "anonymous")
+				ctx = context.WithValue(ctx, scopesKey, []string{"read"})
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
@@ -56,9 +70,9 @@ func (a *Authenticator) Middleware(requiredScopes ...string) func(http.Handler) 
 			}
 
 			token := parts[1]
-			scopes, ok := a.tokens[token]
-			if !ok {
-				http.Error(w, `{"error": {"code": "UNAUTHORIZED", "message": "Invalid token"}}`, http.StatusUnauthorized)
+			user, scopes, err := a.userRepo.ValidateToken(r.Context(), token)
+			if err != nil {
+				http.Error(w, `{"error": {"code": "UNAUTHORIZED", "message": "Invalid or expired token"}}`, http.StatusUnauthorized)
 				return
 			}
 
@@ -68,8 +82,9 @@ func (a *Authenticator) Middleware(requiredScopes ...string) func(http.Handler) 
 				return
 			}
 
-			// Add actor and scopes to context
-			ctx := context.WithValue(r.Context(), actorKey, "authenticated")
+			// Add user, actor and scopes to context
+			ctx := context.WithValue(r.Context(), actorKey, user.Username)
+			ctx = context.WithValue(ctx, userKey, user)
 			ctx = context.WithValue(ctx, scopesKey, scopes)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -82,6 +97,14 @@ func ActorFromContext(ctx context.Context) string {
 		return actor
 	}
 	return "anonymous"
+}
+
+// UserFromContext retrieves the user from context
+func UserFromContext(ctx context.Context) *User {
+	if user, ok := ctx.Value(userKey).(*User); ok {
+		return user
+	}
+	return nil
 }
 
 // ScopesFromContext retrieves the scopes from context

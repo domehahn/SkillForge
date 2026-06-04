@@ -24,6 +24,11 @@ func WriteJSON(w http.ResponseWriter, status int, data interface{}) {
 	json.NewEncoder(w).Encode(data)
 }
 
+// ParseJSON parses JSON from request body
+func ParseJSON(r *http.Request, v interface{}) error {
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
 // WriteError writes an error response
 func WriteError(w http.ResponseWriter, status int, code, message string, details ...string) {
 	resp := ErrorResponse{

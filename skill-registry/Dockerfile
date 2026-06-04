@@ -1,4 +1,14 @@
-FROM golang:1.23-alpine AS builder
+# Build Web UI
+FROM node:20-alpine AS web-builder
+
+WORKDIR /web
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# Build Go binaries
+FROM golang:1.25-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make gcc musl-dev sqlite-dev
@@ -14,7 +24,7 @@ COPY . .
 
 # Build binaries
 RUN CGO_ENABLED=1 go build -o skill-registry ./cmd/skill-registry
-RUN CGO_ENABLED=1 go build -o skillctl ./cmd/skillctl
+RUN CGO_ENABLED=1 go build -o skforge ./cmd/skforge
 
 # Runtime image
 FROM alpine:3.19
@@ -26,7 +36,10 @@ WORKDIR /app
 
 # Copy binaries from builder
 COPY --from=builder /build/skill-registry /app/
-COPY --from=builder /build/skillctl /app/
+COPY --from=builder /build/skforge /app/
+
+# Copy web UI from web-builder
+COPY --from=web-builder /web/dist /app/web/dist
 
 # Create data directory
 RUN mkdir -p /app/data

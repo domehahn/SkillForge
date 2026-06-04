@@ -40,6 +40,11 @@ func (r *Repository) Close() error {
 	return r.db.Close()
 }
 
+// GetDB returns the database connection
+func (r *Repository) GetDB() *sql.DB {
+	return r.db
+}
+
 func (r *Repository) migrate() error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS skills (

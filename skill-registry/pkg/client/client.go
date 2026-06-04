@@ -170,3 +170,141 @@ func (c *Client) Validate(data []byte, contentType string) (*validation.Validati
 
 	return &result, nil
 }
+
+// LoginResponse represents the login API response
+type LoginResponse struct {
+	Token     string    `json:"token"`
+	User      string    `json:"user"`
+	Role      string    `json:"role"`
+	Scopes    []string  `json:"scopes"`
+	ExpiresAt *string   `json:"expires_at,omitempty"`
+}
+
+// TokenResponse represents a token
+type TokenResponse struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"user_id"`
+	Name      string    `json:"name"`
+	Token     string    `json:"token,omitempty"`
+	Scopes    []string  `json:"scopes"`
+	CreatedAt string    `json:"created_at"`
+	ExpiresAt *string   `json:"expires_at,omitempty"`
+	RevokedAt *string   `json:"revoked_at,omitempty"`
+}
+
+// Login authenticates with username and password
+func (c *Client) Login(username, password string) (*LoginResponse, error) {
+	reqBody := map[string]string{
+		"username": username,
+		"password": password,
+	}
+	
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"Content-Type": "application/json",
+	}
+
+	resp, err := c.doRequest("POST", "/api/v1/auth/login", bytes.NewReader(jsonData), headers)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("login failed: %s (status %d)", string(body), resp.StatusCode)
+	}
+
+	var loginResp LoginResponse
+	if err := json.NewDecoder(resp.Body).Decode(&loginResp); err != nil {
+		return nil, err
+	}
+
+	// Update client token
+	c.token = loginResp.Token
+
+	return &loginResp, nil
+}
+
+// CreateToken creates a new API token
+func (c *Client) CreateToken(name string, scopes []string, expiresIn *int64) (*TokenResponse, error) {
+	reqBody := map[string]interface{}{
+		"name":   name,
+		"scopes": scopes,
+	}
+	if expiresIn != nil {
+		reqBody["expires_in"] = *expiresIn
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	headers := map[string]string{
+		"Content-Type": "application/json",
+	}
+
+	resp, err := c.doRequest("POST", "/api/v1/tokens", bytes.NewReader(jsonData), headers)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("create token failed: %s (status %d)", string(body), resp.StatusCode)
+	}
+
+	var token TokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		return nil, err
+	}
+
+	return &token, nil
+}
+
+// ListTokens lists all tokens for the authenticated user
+func (c *Client) ListTokens() ([]TokenResponse, error) {
+	resp, err := c.doRequest("GET", "/api/v1/tokens", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list tokens failed: %s", string(body))
+	}
+
+	var result struct {
+		Tokens []TokenResponse `json:"tokens"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return result.Tokens, nil
+}
+
+// RevokeToken revokes a token by ID
+func (c *Client) RevokeToken(tokenID int64) error {
+	path := fmt.Sprintf("/api/v1/tokens/%d", tokenID)
+	
+	resp, err := c.doRequest("DELETE", path, nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("revoke token failed: %s", string(body))
+	}
+
+	return nil
+}

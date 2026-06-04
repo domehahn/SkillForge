@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/skillforge/skill-registry/pkg/client"
@@ -44,8 +46,12 @@ func main() {
 		installCommand()
 	case "validate":
 		validateCommand()
+	case "delete":
+		deleteCommand()
+	case "token":
+		tokenCommand()
 	case "version":
-		fmt.Printf("skillctl version %s\n", version)
+		fmt.Printf("skforge version %s\n", version)
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
 		printUsage()
@@ -62,7 +68,11 @@ func printUsage() {
 	fmt.Println("  skforge search <query>")
 	fmt.Println("  skforge info <namespace>/<name>")
 	fmt.Println("  skforge install <namespace>/<name>@<version> --target <dir>")
+	fmt.Println("  skforge delete <namespace>/<name>@<version>")
 	fmt.Println("  skforge validate <path-or-archive>")
+	fmt.Println("  skforge token create --name <name> --scopes <scopes>")
+	fmt.Println("  skforge token list")
+	fmt.Println("  skforge token revoke <token-id>")
 	fmt.Println("  skforge version")
 }
 
@@ -121,22 +131,30 @@ func saveConfig(cfg *Config) error {
 }
 
 func loginCommand() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "Usage: skillctl login")
-		os.Exit(1)
-	}
-
 	fmt.Print("Registry URL: ")
 	var registryURL string
 	fmt.Scanln(&registryURL)
 
-	fmt.Print("Token: ")
-	var token string
-	fmt.Scanln(&token)
+	fmt.Print("Username: ")
+	var username string
+	fmt.Scanln(&username)
 
+	fmt.Print("Password: ")
+	var password string
+	fmt.Scanln(&password)
+
+	// Create client and login
+	c := client.NewClient(registryURL, "")
+	loginResp, err := c.Login(username, password)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Login failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Save config with token
 	cfg := &Config{
 		Registry: registryURL,
-		Token:    token,
+		Token:    loginResp.Token,
 	}
 
 	if err := saveConfig(cfg); err != nil {
@@ -144,7 +162,10 @@ func loginCommand() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Login successful!")
+	fmt.Printf("✅ Login successful!\n")
+	fmt.Printf("   User: %s\n", loginResp.User)
+	fmt.Printf("   Role: %s\n", loginResp.Role)
+	fmt.Printf("   Scopes: %s\n", strings.Join(loginResp.Scopes, ", "))
 }
 
 func publishCommand() {
@@ -594,4 +615,247 @@ func extractMetadata(path string) (namespace, name, version string, err error) {
 
 	// TODO: Actually parse SKILL.md or skill.yaml for metadata
 	return namespace, name, version, nil
+}
+
+func deleteCommand() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage: skforge delete <namespace>/<name>@<version>")
+		os.Exit(1)
+	}
+
+	skillRef := os.Args[2]
+	
+	// Parse namespace/name@version
+	parts := strings.Split(skillRef, "@")
+	if len(parts) != 2 {
+		fmt.Fprintln(os.Stderr, "Invalid skill reference. Expected: <namespace>/<name>@<version>")
+		os.Exit(1)
+	}
+
+	namespaceName := parts[0]
+	version := parts[1]
+
+	nameParts := strings.Split(namespaceName, "/")
+	if len(nameParts) != 2 {
+		fmt.Fprintln(os.Stderr, "Invalid skill reference. Expected: <namespace>/<name>@<version>")
+		os.Exit(1)
+	}
+
+	namespace := nameParts[0]
+	name := nameParts[1]
+
+	// Get config
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cfg.Registry == "" {
+		fmt.Fprintln(os.Stderr, "No registry configured. Run 'skforge login' first.")
+		os.Exit(1)
+	}
+
+	// Confirm deletion
+	fmt.Printf("⚠️  Delete %s/%s@%s? (y/N): ", namespace, name, version)
+	var confirm string
+	fmt.Scanln(&confirm)
+	if strings.ToLower(confirm) != "y" {
+		fmt.Println("Cancelled")
+		return
+	}
+
+	// Send DELETE request
+	url := fmt.Sprintf("%s/api/v1/skills/%s/%s/versions/%s", cfg.Registry, namespace, name, version)
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create request: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cfg.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.Token)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Delete failed: %v\n", err)
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(os.Stderr, "Delete failed: %s (status %d)\n", string(body), resp.StatusCode)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Deleted %s/%s@%s\n", namespace, name, version)
+}
+
+func tokenCommand() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  skforge token create --name <name> --scopes <scopes>")
+		fmt.Fprintln(os.Stderr, "  skforge token list")
+		fmt.Fprintln(os.Stderr, "  skforge token revoke <token-id>")
+		os.Exit(1)
+	}
+
+	subcommand := os.Args[2]
+
+	switch subcommand {
+	case "create":
+		tokenCreateCommand()
+	case "list":
+		tokenListCommand()
+	case "revoke":
+		tokenRevokeCommand()
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown token subcommand: %s\n", subcommand)
+		os.Exit(1)
+	}
+}
+
+func tokenCreateCommand() {
+	// Parse flags
+	var name string
+	var scopesStr string
+
+	for i := 3; i < len(os.Args); i++ {
+		if os.Args[i] == "--name" && i+1 < len(os.Args) {
+			name = os.Args[i+1]
+			i++
+		} else if os.Args[i] == "--scopes" && i+1 < len(os.Args) {
+			scopesStr = os.Args[i+1]
+			i++
+		}
+	}
+
+	if name == "" {
+		fmt.Fprintln(os.Stderr, "Error: --name is required")
+		os.Exit(1)
+	}
+
+	if scopesStr == "" {
+		fmt.Fprintln(os.Stderr, "Error: --scopes is required")
+		os.Exit(1)
+	}
+
+	scopes := strings.Split(scopesStr, ",")
+
+	// Get config
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cfg.Registry == "" || cfg.Token == "" {
+		fmt.Fprintln(os.Stderr, "Not logged in. Run 'skforge login' first.")
+		os.Exit(1)
+	}
+
+	// Create client and token
+	c := client.NewClient(cfg.Registry, cfg.Token)
+	token, err := c.CreateToken(name, scopes, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create token: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Token created successfully!\n")
+	fmt.Printf("   Name: %s\n", token.Name)
+	fmt.Printf("   Scopes: %s\n", strings.Join(token.Scopes, ", "))
+	fmt.Printf("   Token: %s\n", token.Token)
+	fmt.Printf("\n⚠️  Save this token - it will only be shown once!\n")
+}
+
+func tokenListCommand() {
+	// Get config
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cfg.Registry == "" || cfg.Token == "" {
+		fmt.Fprintln(os.Stderr, "Not logged in. Run 'skforge login' first.")
+		os.Exit(1)
+	}
+
+	// Create client and list tokens
+	c := client.NewClient(cfg.Registry, cfg.Token)
+	tokens, err := c.ListTokens()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to list tokens: %v\n", err)
+		os.Exit(1)
+	}
+
+	if len(tokens) == 0 {
+		fmt.Println("No tokens found")
+		return
+	}
+
+	fmt.Printf("Tokens:\n\n")
+	for _, token := range tokens {
+		status := "active"
+		if token.RevokedAt != nil {
+			status = "revoked"
+		}
+		
+		fmt.Printf("  ID: %d\n", token.ID)
+		fmt.Printf("  Name: %s\n", token.Name)
+		fmt.Printf("  Scopes: %s\n", strings.Join(token.Scopes, ", "))
+		fmt.Printf("  Status: %s\n", status)
+		fmt.Printf("  Created: %s\n", token.CreatedAt)
+		if token.ExpiresAt != nil {
+			fmt.Printf("  Expires: %s\n", *token.ExpiresAt)
+		}
+		fmt.Println()
+	}
+}
+
+func tokenRevokeCommand() {
+	if len(os.Args) < 4 {
+		fmt.Fprintln(os.Stderr, "Usage: skforge token revoke <token-id>")
+		os.Exit(1)
+	}
+
+	tokenIDStr := os.Args[3]
+	tokenID, err := strconv.ParseInt(tokenIDStr, 10, 64)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid token ID: %s\n", tokenIDStr)
+		os.Exit(1)
+	}
+
+	// Get config
+	cfg, err := getConfig()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	if cfg.Registry == "" || cfg.Token == "" {
+		fmt.Fprintln(os.Stderr, "Not logged in. Run 'skforge login' first.")
+		os.Exit(1)
+	}
+
+	// Confirm revocation
+	fmt.Printf("⚠️  Revoke token #%d? (y/N): ", tokenID)
+	var confirm string
+	fmt.Scanln(&confirm)
+	if strings.ToLower(confirm) != "y" {
+		fmt.Println("Cancelled")
+		return
+	}
+
+	// Create client and revoke token
+	c := client.NewClient(cfg.Registry, cfg.Token)
+	if err := c.RevokeToken(tokenID); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to revoke token: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("✅ Token #%d revoked\n", tokenID)
 }
