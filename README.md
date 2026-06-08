@@ -1,41 +1,50 @@
 # SkillForge
 
-SkillForge is a self-hosted registry and lifecycle platform for AI Agent Skills.
+SkillForge is a self-hosted registry server for immutable AI Agent Skill artifacts.
 
-Use `skcr` to scaffold or render local agent/project structures. Use SkillForge and `skforge` to package, publish, discover, install, pin, verify, deprecate, and govern skill artifacts.
+Use `skcr` to scaffold and render local agent/project structures.
+Use `skpm` to validate, package, publish, install, lock, update, and verify skills.
+Use SkillForge as the self-hosted registry server for immutable skill artifacts.
+Use `skforge` for SkillForge-specific administration, governance, and debugging.
 
-This repository contains `skill-registry/`, the registry product implementation:
+This repository contains `skill-registry/`, the registry server implementation:
 
 - registry server
 - REST API
 - Web UI
-- `skforge` CLI
+- `skforge` admin CLI
 - content-addressable package storage
 - SQLite metadata
 - token authentication
-- validation, lockfile, packaging, and governance workflows
+- governance workflows (deprecate, yank, unyank, delete)
 
 ## Responsibility Boundary
 
-SkillForge / `skforge` owns artifact lifecycle:
+SkillForge / `skforge` owns registry-server concerns:
 
-- registry
-- publish, search, info, install
-- validate and package
-- lock and verify
-- deprecate, yank, unyank, delete
+- immutable artifact storage and content-addressed retrieval
+- search, info, resolve, download, and publish API endpoints
+- server-side publish validation and metadata consistency checks
+- deprecate, yank, unyank, delete governance
 - token management and audit logging
-- skill artifact governance
+- namespace ACLs and webhooks
+
+`skpm` owns consumer lifecycle:
+
+- validate and lint skill packages locally
+- format and package skills into ZIP/TGZ artifacts
+- publish lifecycle orchestration (calls SkillForge API)
+- `agent-skills.yaml` and `agent-skills.lock` management
+- install, update, outdated, and verify workflows
+- multi-registry client behavior
 
 `skcr` owns local creation and rendering:
 
-- scaffold skill skeletons
-- scaffold project templates
+- scaffold skill skeletons and project templates
 - bake/render platform-specific project files
-- manage `agentic.bake.yaml`
-- manage `.agentic-template.lock`
+- manage `agentic.bake.yaml` and `.agentic-template.lock`
 
-SkillForge must not absorb `skcr bake`, project template rendering, or platform-specific project generation.
+SkillForge must not absorb `skcr bake`, project template rendering, or consumer-lifecycle commands (`install`, `lock`, `verify`) that belong to `skpm`.
 
 ## Versioning Model
 
@@ -104,7 +113,7 @@ security:
 
 ## Workflow
 
-Local development:
+Start the registry server:
 
 ```bash
 cd skill-registry
@@ -112,22 +121,32 @@ make build
 ./bin/skill-registry
 ```
 
-Publish:
+Administer the registry with `skforge`:
 
 ```bash
-skforge validate gitlab-policy-reviewer --strict
-skforge package gitlab-policy-reviewer --output-dir dist --source-commit "$(git rev-parse HEAD)" --provenance
-skforge publish dist/gitlab-policy-reviewer-1.5.0.tgz --registry http://localhost:8080
+skforge token create --name ci-publish --scopes write
+skforge skills list
+skforge skills deprecate default/gitlab-policy-reviewer 1.4.0 --reason "superseded by 1.5.0"
+skforge skills yank default/gitlab-policy-reviewer 1.3.0 --reason "critical bug"
 ```
 
-Consume in a project:
+Publish a skill (use `skpm` for the full lifecycle):
 
 ```bash
-skforge init
-skforge add default/gitlab-policy-reviewer@^1.5.0
-skforge lock
-skforge install --frozen-lockfile
-skforge verify
+# package and publish via skpm
+skpm validate gitlab-policy-reviewer --strict
+skpm package gitlab-policy-reviewer --output-dir dist --source-commit "$(git rev-parse HEAD)"
+skpm publish dist/gitlab-policy-reviewer-1.5.0.tgz --registry http://localhost:8080
+```
+
+Consume skills in a project (use `skpm`):
+
+```bash
+skpm init
+skpm add default/gitlab-policy-reviewer@^1.5.0
+skpm lock
+skpm install --frozen-lockfile
+skpm verify
 ```
 
 The lockfile records resolved versions, SHA-256 digests, registry URLs, and install targets.
@@ -148,4 +167,4 @@ Skills can run commands, read context, write files, or influence agent behavior.
 
 ## Roadmap Boundaries
 
-SkillForge may grow toward more lifecycle features currently discussed for `skpm`, but the product boundary stays clear: SkillForge governs versioned artifacts; `skcr` renders local project structures.
+The product boundary is fixed: SkillForge stores and serves versioned artifacts; `skpm` manages the consumer lifecycle; `skcr` renders local project structures. SkillForge will not absorb consumer-side packaging, lockfile management, or install workflows.

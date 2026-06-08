@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/domehahn/sklib/spec"
 	"github.com/skillforge/skill-registry/internal/metadata"
 	"github.com/skillforge/skill-registry/internal/validation"
 )
@@ -39,24 +40,10 @@ type Result struct {
 	Version       string                  `json:"version"`
 	SHA256        string                  `json:"sha256"`
 	PackageType   string                  `json:"package_type"`
-	Manifest      GeneratedManifest       `json:"manifest"`
+	Manifest      spec.PackageManifest    `json:"manifest"`
 	SkillManifest *metadata.SkillManifest `json:"skill_manifest,omitempty"`
 	Warnings      []string                `json:"warnings,omitempty"`
 	Signature     string                  `json:"signature,omitempty"`
-}
-
-type GeneratedManifest struct {
-	Name           string               `json:"name"`
-	Namespace      string               `json:"namespace"`
-	Version        string               `json:"version"`
-	Description    string               `json:"description"`
-	SHA256         string               `json:"sha256"`
-	SourceCommit   string               `json:"source_commit,omitempty"`
-	CreatedAt      string               `json:"created_at"`
-	Entrypoint     string               `json:"entrypoint"`
-	CompatibleWith []string             `json:"compatible_with"`
-	PackageType    string               `json:"package_type"`
-	Provenance     *metadata.Provenance `json:"provenance,omitempty"`
 }
 
 type fileEntry struct {
@@ -102,18 +89,31 @@ func Build(skillDir string, opts Options, validator *validation.Validator) (*Res
 	checksums := checksumsText(entries)
 	entries = append(entries, fileEntry{Rel: "checksums.txt", Content: []byte(checksums), Mode: 0644})
 
-	genManifest := GeneratedManifest{
-		Name: manifest.Name, Namespace: manifest.Namespace, Version: manifest.Version,
-		Description: manifest.Description, SourceCommit: opts.SourceCommit, CreatedAt: normalizedTimestamp,
-		Entrypoint: manifest.Entrypoint, CompatibleWith: append([]string{}, manifest.CompatibleWith...),
-		PackageType: opts.Format,
+	filePaths := make([]string, len(entries))
+	for i, e := range entries {
+		filePaths[i] = e.Rel
 	}
-	if opts.Provenance || opts.SourceCommit != "" {
-		genManifest.Provenance = &metadata.Provenance{
-			SourceCommit: opts.SourceCommit, BuildTimestamp: time.Unix(0, 0).UTC(), ToolVersion: "skforge",
-		}
+	sort.Strings(filePaths)
+
+	pkgManifest := spec.PackageManifest{
+		SpecVersion:    1,
+		Name:           manifest.Name,
+		Namespace:      manifest.Namespace,
+		Version:        manifest.Version,
+		Description:    manifest.Description,
+		Entrypoint:     manifest.Entrypoint,
+		CompatibleWith: manifest.CompatibleWith,
+		PackageType:    opts.Format,
+		SourceCommit:   opts.SourceCommit,
+		PackagedBy:     "skforge",
+		PackagedAt:     normalizedTimestamp,
+		License:        manifest.License,
+		Files:          filePaths,
 	}
-	manifestBytes, err := json.MarshalIndent(genManifest, "", "  ")
+	if opts.Provenance && opts.SourceCommit != "" {
+		pkgManifest.Provenance = "source:" + opts.SourceCommit
+	}
+	manifestBytes, err := json.MarshalIndent(pkgManifest, "", "  ")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,15 +126,12 @@ func Build(skillDir string, opts Options, validator *validation.Validator) (*Res
 	}
 	digest := sha256.Sum256(data)
 	digestHex := hex.EncodeToString(digest[:])
-	genManifest.SHA256 = digestHex
-	if genManifest.Provenance != nil {
-		genManifest.Provenance.PackageDigest = "sha256:" + digestHex
-	}
+	pkgManifest.SHA256 = digestHex
 	result := &Result{
 		FileName: fmt.Sprintf("%s-%s.%s", manifest.Name, manifest.Version, opts.Format),
 		Name:     manifest.Name, Namespace: manifest.Namespace, Version: manifest.Version,
-		SHA256: digestHex, PackageType: opts.Format, Manifest: genManifest,
-		SkillManifest: manifest, Warnings: validationResult.Warnings,
+		SHA256: digestHex, PackageType: opts.Format, Manifest: pkgManifest,
+		SkillManifest: metadata.SkillManifestFromSpec(manifest), Warnings: validationResult.Warnings,
 	}
 	if opts.Sign {
 		result.Signature = LocalSignature(digestHex)

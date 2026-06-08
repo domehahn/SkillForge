@@ -10,6 +10,7 @@ GOFMT=gofmt
 # Binary names
 REGISTRY_BINARY=skill-registry
 CLI_BINARY=skforge
+SKPM_BINARY=skpm
 
 # Build directory
 BIN_DIR=./bin
@@ -22,6 +23,7 @@ build:
 	@mkdir -p $(BIN_DIR)
 	$(GOBUILD) -o $(BIN_DIR)/$(REGISTRY_BINARY) ./cmd/skill-registry
 	$(GOBUILD) -o $(BIN_DIR)/$(CLI_BINARY) ./cmd/skforge
+	$(GOBUILD) -o $(BIN_DIR)/$(SKPM_BINARY) ./cmd/skpm
 	@echo "Build complete!"
 
 test:

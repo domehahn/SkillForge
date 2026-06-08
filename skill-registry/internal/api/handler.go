@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/domehahn/sklib/registryapi"
+	"github.com/domehahn/sklib/spec"
 	"github.com/skillforge/skill-registry/internal/auth"
 	"github.com/skillforge/skill-registry/internal/config"
 	"github.com/skillforge/skill-registry/internal/metadata"
@@ -148,18 +150,21 @@ func (h *Handler) GetCapabilities(w http.ResponseWriter, r *http.Request) {
 	if h.config.Auth.Enabled {
 		authMode = "token"
 	}
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"api_version":         "v1",
-		"package_formats":     h.config.Storage.AllowedPackageTypes,
-		"auth_mode":           authMode,
-		"auth_enabled":        h.config.Auth.Enabled,
-		"max_package_size_mb": h.config.Storage.MaxPackageSizeMB,
-		"supported_platforms": validation.SupportedPlatforms(),
-		"signing":             "local-hook",
-		"deprecate_yank":      true,
-		"lock_resolution":     true,
-		"immutable_versions":  true,
-		"production_latest":   false,
+	caps := registryapi.FullCapabilities("v1")
+	caps.PackageTypes = h.config.Storage.AllowedPackageTypes
+	caps.MaxPackageSizeBytes = int64(h.config.Storage.MaxPackageSizeMB) * 1024 * 1024
+	// Registry-specific extensions beyond the shared contract.
+	type capabilitiesExt struct {
+		registryapi.CapabilitiesResponse
+		AuthMode           string   `json:"auth_mode"`
+		AuthEnabled        bool     `json:"auth_enabled"`
+		SupportedPlatforms []string `json:"supported_platforms"`
+	}
+	WriteJSON(w, http.StatusOK, capabilitiesExt{
+		CapabilitiesResponse: caps,
+		AuthMode:             authMode,
+		AuthEnabled:          h.config.Auth.Enabled,
+		SupportedPlatforms:   validation.SupportedPlatforms(),
 	})
 }
 
@@ -213,7 +218,14 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusCreated, skillVersion)
+	WriteJSON(w, http.StatusCreated, registryapi.PublishResponse{
+		Namespace:   namespace,
+		Name:        name,
+		Version:     version,
+		DownloadURL: h.downloadURL(r, namespace, name, version),
+		SHA256:      skillVersion.DigestSHA256,
+		Created:     true,
+	})
 }
 
 // ListSkills handles skill listing
@@ -254,7 +266,17 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	WriteJSON(w, http.StatusOK, skills)
+	results := make([]registryapi.SearchResult, 0, len(skills.Skills))
+	for _, s := range skills.Skills {
+		results = append(results, registryapi.SearchResult{
+			Namespace:     s.Namespace,
+			Name:          s.Name,
+			LatestVersion: s.LatestVersion,
+			Description:   s.Description,
+			Tags:          s.Tags,
+		})
+	}
+	WriteJSON(w, http.StatusOK, registryapi.SearchResponse{Results: results, Total: skills.Total})
 }
 
 func (h *Handler) ResolveSkill(w http.ResponseWriter, r *http.Request) {
@@ -265,7 +287,7 @@ func (h *Handler) ResolveSkill(w http.ResponseWriter, r *http.Request) {
 	if constraint == "" {
 		constraint = "*"
 	}
-	skill, versions, err := h.registry.GetSkill(ctx, namespace, name)
+	_, versions, err := h.registry.GetSkill(ctx, namespace, name)
 	if err != nil {
 		WriteError(w, http.StatusNotFound, "SKILL_NOT_FOUND", err.Error())
 		return
@@ -275,10 +297,14 @@ func (h *Handler) ResolveSkill(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusNotFound, "NO_MATCHING_VERSION", "no version satisfies the requested constraint")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"skill":      skill,
-		"version":    resolved,
-		"constraint": constraint,
+	WriteJSON(w, http.StatusOK, registryapi.ResolveResponse{
+		Namespace:      namespace,
+		Name:           name,
+		Version:        resolved.Version,
+		DownloadURL:    h.downloadURL(r, namespace, name, resolved.Version),
+		SHA256:         resolved.DigestSHA256,
+		PackageType:    resolved.PackageType,
+		CompatibleWith: compatibleWithPlatforms(resolved.AgentCompatibility),
 	})
 }
 
@@ -342,13 +368,23 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "GET_FAILED", "Failed to get dist-tags")
 		return
 	}
-	response := map[string]interface{}{
-		"skill":     skill,
-		"versions":  versions,
-		"dist_tags": distTags,
-	}
 
-	WriteJSON(w, http.StatusOK, response)
+	type skillDetailsResponse struct {
+		registryapi.SkillInfoResponse
+		DistTags map[string]string `json:"dist_tags,omitempty"`
+	}
+	WriteJSON(w, http.StatusOK, skillDetailsResponse{
+		SkillInfoResponse: registryapi.SkillInfoResponse{
+			Namespace:     skill.Namespace,
+			Name:          skill.Name,
+			LatestVersion: skill.LatestVersion,
+			Description:   skill.Description,
+			Tags:          skill.Tags,
+			Owners:        skill.Owners,
+			Versions:      toRegistryAPIVersions(versions),
+		},
+		DistTags: distTags,
+	})
 }
 
 // GetVersion handles retrieving a specific version
@@ -756,6 +792,42 @@ func apiVersionParts(v string) [3]int {
 	for i := 0; i < len(parts) && i < 3; i++ {
 		n, _ := strconv.Atoi(parts[i])
 		out[i] = n
+	}
+	return out
+}
+
+func (h *Handler) downloadURL(r *http.Request, namespace, name, version string) string {
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s/api/v1/skills/%s/%s/versions/%s/download", scheme, r.Host, namespace, name, version)
+}
+
+func compatibleWithPlatforms(agentCompat map[string]string) []spec.Platform {
+	out := make([]spec.Platform, 0, len(agentCompat))
+	for platform := range agentCompat {
+		out = append(out, spec.Platform(platform))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func toRegistryAPIVersions(versions []metadata.SkillVersion) []registryapi.SkillVersion {
+	out := make([]registryapi.SkillVersion, 0, len(versions))
+	for _, v := range versions {
+		rv := registryapi.SkillVersion{
+			Version:           v.Version,
+			Deprecated:        v.Deprecated,
+			DeprecationReason: v.DeprecationReason,
+			Yanked:            v.Yanked,
+			YankReason:        v.YankReason,
+			SHA256:            v.DigestSHA256,
+			PackageType:       v.PackageType,
+			CreatedAt:         v.CreatedAt.Format(time.RFC3339),
+			CompatibleWith:    compatibleWithPlatforms(v.AgentCompatibility),
+		}
+		out = append(out, rv)
 	}
 	return out
 }

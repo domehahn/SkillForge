@@ -46,9 +46,23 @@ func TestPublishValidationRejectsUnknownPlatform(t *testing.T) {
 	assertHasError(t, result.Errors, "unknown compatible_with platform")
 }
 
-func TestPublishValidationDetectsLikelySecret(t *testing.T) {
+func TestPublishValidationRejectsDotEnv(t *testing.T) {
 	validator := NewValidator(50, nil)
 	data := canonicalPackage(t, map[string]string{".env": "API_KEY=abcdefghijklmnopqrstuvwxyz123456\n"})
+	result, err := validator.ValidatePackageWithProfile(data, "tgz", ProfilePublish)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Valid {
+		t.Fatal(".env must not be packageable")
+	}
+	// .env is rejected at path level by packageio.IsForbiddenPackagePath before content scanning.
+	assertHasError(t, result.Errors, "forbidden path")
+}
+
+func TestPublishValidationDetectsLikelySecret(t *testing.T) {
+	validator := NewValidator(50, nil)
+	data := canonicalPackage(t, map[string]string{"config/secrets.yaml": "api_key: 'abcdefghijklmnopqrstuvwxyz123456'\n"})
 	result, err := validator.ValidatePackageWithProfile(data, "tgz", ProfilePublish)
 	if err != nil {
 		t.Fatal(err)

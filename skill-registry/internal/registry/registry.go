@@ -8,10 +8,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/domehahn/sklib/spec"
 	"github.com/skillforge/skill-registry/internal/metadata"
 	"github.com/skillforge/skill-registry/internal/storage"
 	"github.com/skillforge/skill-registry/internal/validation"
 )
+
+// compatibleMap converts a spec.Skill's CompatibleWith slice to the agent-compatibility map stored in the DB.
+func compatibleMap(s *spec.Skill) map[string]string {
+	out := make(map[string]string, len(s.CompatibleWith))
+	for _, p := range s.CompatibleWith {
+		out[string(p)] = "supported"
+	}
+	return out
+}
 
 // Registry orchestrates skill publishing and retrieval
 type Registry struct {
@@ -126,7 +136,7 @@ func (r *Registry) Publish(ctx context.Context, namespace, name, version string,
 		CreatedAt:        time.Now(),
 		CreatedBy:        opts.CreatedBy,
 		EntrypointPath:   "SKILL.md",
-		Manifest:         result.Metadata,
+		Manifest:         metadata.SkillManifestFromSpec(result.Metadata),
 		ValidationStatus: "valid",
 		SignatureStatus:  "unsigned",
 		SignatureDigest:  opts.SignatureDigest,
@@ -177,16 +187,6 @@ func (r *Registry) Publish(ctx context.Context, namespace, name, version string,
 	return skillVersion, nil
 }
 
-func compatibleMap(manifest *metadata.SkillManifest) map[string]string {
-	out := map[string]string{}
-	for _, platform := range manifest.CompatibleWith {
-		out[platform] = "supported"
-	}
-	for k, v := range manifest.Compatibility {
-		out[k] = v
-	}
-	return out
-}
 
 func (r *Registry) calculateLatest(ctx context.Context, namespace, name, candidate string) (string, error) {
 	skill, err := r.repo.GetSkill(ctx, namespace, name)
@@ -198,7 +198,7 @@ func (r *Registry) calculateLatest(ctx context.Context, namespace, name, candida
 		return "", err
 	}
 	all := append([]string{candidate}, versionsToStrings(versions)...)
-	sort.SliceStable(all, func(i, j int) bool { return compareSemver(all[i], all[j]) > 0 })
+	sort.SliceStable(all, func(i, j int) bool { cmp, _ := spec.CompareVersionsSafe(all[i], all[j]); return cmp > 0 })
 	return all[0], nil
 }
 

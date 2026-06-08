@@ -2,6 +2,8 @@ package metadata
 
 import (
 	"time"
+
+	"github.com/domehahn/sklib/spec"
 )
 
 // Skill represents a skill in the registry
@@ -89,6 +91,31 @@ type Provenance struct {
 	BuildTimestamp   time.Time `json:"build_timestamp,omitempty" yaml:"build_timestamp,omitempty"`
 	PackageDigest    string    `json:"package_digest,omitempty" yaml:"package_digest,omitempty"`
 	ToolVersion      string    `json:"tool_version,omitempty" yaml:"tool_version,omitempty"`
+}
+
+// SkillManifestFromSpec maps a spec.Skill (package metadata) to the local SkillManifest DB model.
+func SkillManifestFromSpec(s *spec.Skill) *SkillManifest {
+	if s == nil {
+		return nil
+	}
+	return &SkillManifest{
+		Name:           s.Name,
+		Namespace:      s.Namespace,
+		Version:        s.Version,
+		Description:    s.Description,
+		Tags:           s.Tags,
+		CompatibleWith: spec.PlatformStrings(s.CompatibleWith),
+		Entrypoint:     s.Entrypoint,
+		License:        s.License,
+		Owners:         s.Owners,
+		Security: SkillSecurity{
+			RequiresNetwork: s.Security.RequiresNetwork,
+			RequiresSecrets: s.Security.RequiresSecrets,
+			WritesFiles:     s.Security.WritesFiles,
+			RunsCommands:    s.Security.RunsCommands,
+		},
+		Metadata: s.Metadata,
+	}
 }
 
 // SkillList represents a paginated list of skills

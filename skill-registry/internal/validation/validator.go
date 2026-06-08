@@ -14,7 +14,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/skillforge/skill-registry/internal/metadata"
+	"encoding/json"
+
+	"github.com/domehahn/sklib/packageio"
+	"github.com/domehahn/sklib/spec"
+	"github.com/domehahn/sklib/validate"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,7 +43,7 @@ type ValidationResult struct {
 	Warnings         []string                `json:"warnings"`
 	StructuredErrors []Issue                 `json:"structured_errors,omitempty"`
 	StructuredWarns  []Issue                 `json:"structured_warnings,omitempty"`
-	Metadata         *metadata.SkillManifest `json:"metadata,omitempty"`
+	Metadata         *spec.Skill             `json:"metadata,omitempty"`
 	Files            []string                `json:"files,omitempty"`
 	Deterministic    bool                    `json:"deterministic"`
 	Profile          Profile                 `json:"profile"`
@@ -78,10 +82,7 @@ func NewValidator(maxSizeMB int, blockedExtensions []string) *Validator {
 	}
 }
 
-var skillNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,127}$`)
-var namespaceRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
 var distTagRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-var semverRegex = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$`)
 var secretRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['"]?[A-Za-z0-9_./+=-]{16,}`),
 	regexp.MustCompile(`-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----`),
@@ -89,32 +90,23 @@ var secretRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)github_pat_[A-Za-z0-9_]{20,}`),
 }
 
-var supportedPlatforms = map[string]bool{
-	"codex": true, "claude-code": true, "gitlab-duo": true, "github-copilot": true,
-	"cursor": true, "windsurf": true, "generic": true, "all": true,
-}
-
+// SupportedPlatforms returns the canonical list of known platform identifiers.
 func SupportedPlatforms() []string {
-	out := make([]string, 0, len(supportedPlatforms))
-	for p := range supportedPlatforms {
-		out = append(out, p)
+	all := []spec.Platform{
+		spec.PlatformCodex, spec.PlatformClaudeCode, spec.PlatformGitLabDuo,
+		spec.PlatformGitHubCopilot, spec.PlatformCursor, spec.PlatformWindsurf,
+		spec.PlatformOpenHands, spec.PlatformOpenCode, spec.PlatformOllama,
+		spec.PlatformGeneric,
 	}
-	sort.Strings(out)
-	return out
+	return spec.PlatformStrings(all)
 }
 
 func ValidateSkillName(name string) error {
-	if !skillNameRegex.MatchString(name) {
-		return fmt.Errorf("invalid skill name: must match ^[a-z0-9][a-z0-9._-]{1,127}$")
-	}
-	return nil
+	return spec.ValidateSkillName(name)
 }
 
 func ValidateNamespace(namespace string) error {
-	if !namespaceRegex.MatchString(namespace) {
-		return fmt.Errorf("invalid namespace")
-	}
-	return nil
+	return spec.ValidateNamespace(namespace)
 }
 
 func ValidateDistTag(tag string) error {
@@ -125,7 +117,10 @@ func ValidateDistTag(tag string) error {
 }
 
 func ValidateVersion(version string) error {
-	if !semverRegex.MatchString(version) {
+	if strings.HasPrefix(version, "v") {
+		return fmt.Errorf("invalid version: must not have a 'v' prefix (use %q)", strings.TrimPrefix(version, "v"))
+	}
+	if !spec.IsSemVer(version) {
 		return fmt.Errorf("invalid version: must be valid SemVer")
 	}
 	return nil
@@ -349,7 +344,7 @@ func (v *Validator) validateFiles(files []packageFile, result *ValidationResult)
 		if err != nil {
 			result.addError("INVALID_MANIFEST", manifestFile.Name, err.Error())
 		} else {
-			normalizeManifest(manifest)
+			normalizeSkill(manifest)
 			result.Metadata = manifest
 		}
 	} else if hasSkill && result.Profile == ProfileDefault {
@@ -366,6 +361,36 @@ func (v *Validator) validateFiles(files []packageFile, result *ValidationResult)
 		}
 		if !hasChangelog {
 			result.addError("MISSING_CHANGELOG", "", "CHANGELOG.md is required")
+		}
+	}
+
+	if result.Profile == ProfilePublish {
+		pkgManifestFile, hasPkgManifest := findByBase(byPath, "manifest.json")
+		if !hasPkgManifest {
+			result.addError("MISSING_MANIFEST_JSON", "", "manifest.json is required for publish")
+		} else {
+			var pm spec.PackageManifest
+			if err := json.Unmarshal(pkgManifestFile.Content, &pm); err != nil {
+				result.addError("INVALID_MANIFEST_JSON", pkgManifestFile.Name, "manifest.json is not valid JSON: "+err.Error())
+			} else {
+				vr := validate.ValidatePackageManifest(pm, validate.Options{Strict: true})
+				for _, f := range vr.Findings {
+					if f.Severity == "error" {
+						result.addError("MANIFEST_JSON_"+strings.ToUpper(f.Field), pkgManifestFile.Name, f.Message)
+					}
+				}
+				if result.Metadata != nil && pm.Name != "" && pm.Name != result.Metadata.Name {
+					result.addError("MANIFEST_JSON_NAME_MISMATCH", pkgManifestFile.Name,
+						fmt.Sprintf("manifest.json name %q does not match skill.yaml name %q", pm.Name, result.Metadata.Name))
+				}
+				if result.Metadata != nil && pm.Version != "" && pm.Version != result.Metadata.Version {
+					result.addError("MANIFEST_JSON_VERSION_MISMATCH", pkgManifestFile.Name,
+						fmt.Sprintf("manifest.json version %q does not match skill.yaml version %q", pm.Version, result.Metadata.Version))
+				}
+			}
+		}
+		if _, hasChecksums := findByBase(byPath, "checksums.txt"); !hasChecksums {
+			result.addError("MISSING_CHECKSUMS", "", "checksums.txt is required for publish")
 		}
 	}
 
@@ -400,83 +425,76 @@ func (v *Validator) validateFiles(files []packageFile, result *ValidationResult)
 }
 
 func (v *Validator) validatePath(path string) error {
-	if filepath.IsAbs(path) || strings.HasPrefix(path, "/") {
-		return fmt.Errorf("absolute path not allowed: %s", path)
-	}
-	cleaned := filepath.Clean(path)
-	if cleaned == "." || strings.HasPrefix(cleaned, ".."+string(os.PathSeparator)) || cleaned == ".." || strings.Contains(cleaned, string(os.PathSeparator)+".."+string(os.PathSeparator)) {
-		return fmt.Errorf("path traversal not allowed: %s", path)
-	}
 	if strings.Contains(path, `\`) {
 		return fmt.Errorf("backslash paths are not allowed: %s", path)
+	}
+	if packageio.IsForbiddenPackagePath(path) {
+		return fmt.Errorf("forbidden path: %s", path)
 	}
 	return nil
 }
 
-func ParseSkillManifest(content []byte) (*metadata.SkillManifest, error) {
-	var manifest metadata.SkillManifest
-	if err := yaml.Unmarshal(content, &manifest); err != nil {
+func ParseSkillManifest(content []byte) (*spec.Skill, error) {
+	var s spec.Skill
+	if err := yaml.Unmarshal(content, &s); err != nil {
 		return nil, err
 	}
-	normalizeManifest(&manifest)
-	return &manifest, nil
+	normalizeSkill(&s)
+	return &s, nil
 }
 
-func normalizeManifest(manifest *metadata.SkillManifest) {
-	if manifest.Namespace == "" {
-		manifest.Namespace = "default"
+func normalizeSkill(s *spec.Skill) {
+	if s.Namespace == "" {
+		s.Namespace = spec.DefaultNamespaceValue
 	}
-	if manifest.Entrypoint == "" {
-		manifest.Entrypoint = "SKILL.md"
+	if s.Entrypoint == "" {
+		s.Entrypoint = spec.DefaultEntrypointValue
 	}
-	if len(manifest.CompatibleWith) == 0 && len(manifest.Compatibility) > 0 {
-		for platform := range manifest.Compatibility {
-			manifest.CompatibleWith = append(manifest.CompatibleWith, platform)
-		}
-		sort.Strings(manifest.CompatibleWith)
-	}
+	sort.Slice(s.CompatibleWith, func(i, j int) bool {
+		return s.CompatibleWith[i] < s.CompatibleWith[j]
+	})
 }
 
-func validateManifest(manifest *metadata.SkillManifest, result *ValidationResult, requireCanonical bool) {
-	if manifest.Name == "" {
+func validateManifest(s *spec.Skill, result *ValidationResult, requireCanonical bool) {
+	if s.Name == "" {
 		if requireCanonical {
 			result.addError("MANIFEST_NAME_REQUIRED", "skill.yaml", "skill.yaml name is required")
 		}
-	} else if err := ValidateSkillName(manifest.Name); err != nil {
+	} else if err := ValidateSkillName(s.Name); err != nil {
 		result.addError("INVALID_NAME", "skill.yaml", err.Error())
 	}
-	if manifest.Namespace != "" {
-		if err := ValidateNamespace(manifest.Namespace); err != nil {
+	if s.Namespace != "" {
+		if err := ValidateNamespace(s.Namespace); err != nil {
 			result.addError("INVALID_NAMESPACE", "skill.yaml", err.Error())
 		}
 	}
-	if manifest.Version == "" {
+	if s.Version == "" {
 		if requireCanonical {
 			result.addError("MANIFEST_VERSION_REQUIRED", "skill.yaml", "skill.yaml version is required")
 		}
-	} else if err := ValidateVersion(manifest.Version); err != nil {
+	} else if err := ValidateVersion(s.Version); err != nil {
 		result.addError("INVALID_VERSION", "skill.yaml", err.Error())
 	}
 	if requireCanonical {
-		if strings.TrimSpace(manifest.Description) == "" {
+		if strings.TrimSpace(s.Description) == "" {
 			result.addError("DESCRIPTION_REQUIRED", "skill.yaml", "description is required")
 		}
-		if len(manifest.CompatibleWith) == 0 {
+		if len(s.CompatibleWith) == 0 {
 			result.addError("COMPATIBLE_WITH_REQUIRED", "skill.yaml", "compatible_with is required")
 		}
-		if strings.TrimSpace(manifest.Entrypoint) == "" {
+		if strings.TrimSpace(s.Entrypoint) == "" {
 			result.addError("ENTRYPOINT_REQUIRED", "skill.yaml", "entrypoint is required")
 		}
 	}
-	for _, platform := range manifest.CompatibleWith {
-		if !supportedPlatforms[platform] {
+	for _, platform := range s.CompatibleWith {
+		if !spec.IsKnownPlatform(string(platform)) {
 			result.addError("UNKNOWN_PLATFORM", "skill.yaml", fmt.Sprintf("unknown compatible_with platform %q", platform))
 		}
 	}
-	if len(manifest.Owners) == 0 {
+	if len(s.Owners) == 0 {
 		result.addWarning("OWNERS_RECOMMENDED", "skill.yaml", "owners are recommended")
 	}
-	if manifest.License == "" {
+	if s.License == "" {
 		result.addWarning("LICENSE_RECOMMENDED", "skill.yaml", "license is recommended")
 	}
 }
@@ -498,8 +516,8 @@ func (v *Validator) scanContent(path string, content []byte, result *ValidationR
 	}
 }
 
-func (v *Validator) extractFrontmatterManifest(skillMDContent []byte) *metadata.SkillManifest {
-	manifest := &metadata.SkillManifest{Entrypoint: "SKILL.md", Namespace: "default"}
+func (v *Validator) extractFrontmatterManifest(skillMDContent []byte) *spec.Skill {
+	s := &spec.Skill{Entrypoint: spec.DefaultEntrypointValue, Namespace: spec.DefaultNamespaceValue}
 	scanner := bufio.NewScanner(bytes.NewReader(skillMDContent))
 	var lines []string
 	inFrontmatter := false
@@ -520,13 +538,13 @@ func (v *Validator) extractFrontmatterManifest(skillMDContent []byte) *metadata.
 		}
 	}
 	if foundFrontmatter && len(lines) > 0 {
-		_ = yaml.Unmarshal([]byte(strings.Join(lines, "\n")), manifest)
-		normalizeManifest(manifest)
+		_ = yaml.Unmarshal([]byte(strings.Join(lines, "\n")), s)
+		normalizeSkill(s)
 	}
-	return manifest
+	return s
 }
 
-func (v *Validator) extractManifest(skillMDContent []byte) *metadata.SkillManifest {
+func (v *Validator) extractManifest(skillMDContent []byte) *spec.Skill {
 	return v.extractFrontmatterManifest(skillMDContent)
 }
 

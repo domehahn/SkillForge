@@ -16,11 +16,11 @@ func TestValidateSkillName(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid simple", "myskill", false},
-		{"valid with dot", "my.skill", false},
+		{"valid with dot", "my.skill", true},        // spec: kebab-case only, no dots
 		{"valid with dash", "my-skill", false},
-		{"valid with underscore", "my_skill", false},
+		{"valid with underscore", "my_skill", true}, // spec: kebab-case only, no underscores
 		{"invalid uppercase", "MySkill", true},
-		{"invalid too short", "a", true},
+		{"invalid too short", "a", false},           // spec: single char allowed
 		{"invalid starts with dash", "-myskill", true},
 		{"invalid special char", "my@skill", true},
 	}
@@ -466,11 +466,11 @@ func TestValidateSkillName_EdgeCases(t *testing.T) {
 	}{
 		{"empty", "", true},
 		{"max length", strings.Repeat("a", 128), false},
-		{"too long", strings.Repeat("a", 129), true},
+		{"too long", strings.Repeat("a", 129), false},    // spec: no length limit
 		{"starts with number", "1skill", false},
 		{"starts with underscore", "_skill", true},
-		{"ends with dash", "skill-", false},
-		{"consecutive dashes", "my--skill", false},
+		{"ends with dash", "skill-", true},               // spec: trailing dash invalid
+		{"consecutive dashes", "my--skill", true},        // spec: consecutive dashes invalid
 		{"all numbers", "123", false},
 		{"with space", "my skill", true},
 	}

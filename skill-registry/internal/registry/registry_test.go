@@ -198,11 +198,13 @@ func createTestPackage(t *testing.T) []byte {
 	tw := tar.NewWriter(gzw)
 
 	files := map[string]string{
-		"SKILL.md":     "# Hello Skill\n\nA test skill.",
-		"VERSION":      "1.0.0\n",
-		"skill.yaml":   "name: hello-skill\nnamespace: test\nversion: 1.0.0\ndescription: A test skill.\nowners:\n  - test-team\nlicense: MIT\ncompatible_with:\n  - codex\nentrypoint: SKILL.md\nsecurity:\n  requires_network: false\n  requires_secrets: false\n  writes_files: false\n  runs_commands: false\n",
-		"CHANGELOG.md": "# Changelog\n\n## 1.0.0\n\n### Added\n- Initial test skill.\n",
-		"README.md":    "# README",
+		"SKILL.md":      "# Hello Skill\n\nA test skill.",
+		"VERSION":       "1.0.0\n",
+		"skill.yaml":    "name: hello-skill\nnamespace: test\nversion: 1.0.0\ndescription: A test skill.\nowners:\n  - test-team\nlicense: MIT\ncompatible_with:\n  - codex\nentrypoint: SKILL.md\nsecurity:\n  requires_network: false\n  requires_secrets: false\n  writes_files: false\n  runs_commands: false\n",
+		"CHANGELOG.md":  "# Changelog\n\n## 1.0.0\n\n### Added\n- Initial test skill.\n",
+		"README.md":     "# README",
+		"manifest.json": `{"spec_version":1,"name":"hello-skill","namespace":"test","version":"1.0.0","entrypoint":"SKILL.md","compatible_with":["codex"],"package_type":"tgz","packaged_by":"skforge","packaged_at":"1970-01-01T00:00:00Z"}`,
+		"checksums.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  SKILL.md\n",
 	}
 
 	for name, content := range files {

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/domehahn/sklib/spec"
 	"github.com/skillforge/skill-registry/internal/metadata"
 	"github.com/skillforge/skill-registry/internal/validation"
 )
@@ -148,7 +149,7 @@ func (r *Registry) ResolveArtifactVersion(ctx context.Context, kind, namespace, 
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(versions, func(i, j int) bool { return compareSemver(versions[i].Version, versions[j].Version) > 0 })
+	sort.Slice(versions, func(i, j int) bool { cmp, _ := spec.CompareVersionsSafe(versions[i].Version, versions[j].Version); return cmp > 0 })
 	for i := range versions {
 		if semverMatches(versions[i].Version, ref) {
 			return &versions[i], nil
@@ -422,19 +423,6 @@ func semverParts(version string) [3]int {
 	return result
 }
 
-func compareSemver(a, b string) int {
-	pa, pb := semverParts(a), semverParts(b)
-	for i := 0; i < 3; i++ {
-		if pa[i] > pb[i] {
-			return 1
-		}
-		if pa[i] < pb[i] {
-			return -1
-		}
-	}
-	return 0
-}
-
 func semverMatches(version, constraint string) bool {
 	if constraint == "" || constraint == "*" || constraint == "latest" {
 		return true
@@ -442,12 +430,14 @@ func semverMatches(version, constraint string) bool {
 	if strings.HasPrefix(constraint, "^") {
 		base := strings.TrimPrefix(constraint, "^")
 		v, b := semverParts(version), semverParts(base)
-		return v[0] == b[0] && compareSemver(version, base) >= 0
+		cmp, _ := spec.CompareVersionsSafe(version, base)
+		return v[0] == b[0] && cmp >= 0
 	}
 	if strings.HasPrefix(constraint, "~") {
 		base := strings.TrimPrefix(constraint, "~")
 		v, b := semverParts(version), semverParts(base)
-		return v[0] == b[0] && v[1] == b[1] && compareSemver(version, base) >= 0
+		cmp, _ := spec.CompareVersionsSafe(version, base)
+		return v[0] == b[0] && v[1] == b[1] && cmp >= 0
 	}
 	return version == constraint
 }
