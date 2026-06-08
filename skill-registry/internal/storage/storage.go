@@ -31,6 +31,10 @@ func NewStorage(dataDir string) (*Storage, error) {
 
 // Store stores package data and returns the SHA-256 digest
 func (s *Storage) Store(namespace, name, version string, data []byte) (digest string, err error) {
+	return s.StoreArtifact("skill", namespace, name, version, data)
+}
+
+func (s *Storage) StoreArtifact(kind, namespace, name, version string, data []byte) (digest string, err error) {
 	// Compute SHA-256
 	hash := sha256.Sum256(data)
 	digest = hex.EncodeToString(hash[:])
@@ -41,17 +45,35 @@ func (s *Storage) Store(namespace, name, version string, data []byte) (digest st
 		return "", fmt.Errorf("failed to create blob directory: %w", err)
 	}
 
-	if err := os.WriteFile(blobPath, data, 0644); err != nil {
-		return "", fmt.Errorf("failed to write blob: %w", err)
+	if _, err := os.Stat(blobPath); os.IsNotExist(err) {
+		tmp, err := os.CreateTemp(filepath.Dir(blobPath), ".blob-*")
+		if err != nil {
+			return "", fmt.Errorf("failed to create temporary blob: %w", err)
+		}
+		tmpPath := tmp.Name()
+		defer os.Remove(tmpPath)
+		if _, err := tmp.Write(data); err != nil {
+			tmp.Close()
+			return "", fmt.Errorf("failed to write blob: %w", err)
+		}
+		if err := tmp.Close(); err != nil {
+			return "", fmt.Errorf("failed to close blob: %w", err)
+		}
+		if err := os.Rename(tmpPath, blobPath); err != nil && !os.IsExist(err) {
+			return "", fmt.Errorf("failed to commit blob: %w", err)
+		}
 	}
 
 	// Also store as named package for easier browsing
-	packagePath := s.packagePath(namespace, name, version)
+	packagePath := s.artifactPackagePath(kind, namespace, name, version)
 	if err := os.MkdirAll(filepath.Dir(packagePath), 0755); err != nil {
 		return "", fmt.Errorf("failed to create package directory: %w", err)
 	}
 
-	// Create symlink or copy
+	// Replace the browsable package reference without mutating an existing blob hard link.
+	if err := os.Remove(packagePath); err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to replace package link: %w", err)
+	}
 	if err := s.linkOrCopy(blobPath, packagePath); err != nil {
 		return "", fmt.Errorf("failed to link package: %w", err)
 	}
@@ -109,6 +131,13 @@ func (s *Storage) blobPath(digest string) string {
 
 func (s *Storage) packagePath(namespace, name, version string) string {
 	return filepath.Join(s.dataDir, "packages", namespace, name, version+".tgz")
+}
+
+func (s *Storage) artifactPackagePath(kind, namespace, name, version string) string {
+	if kind == "skill" {
+		return s.packagePath(namespace, name, version)
+	}
+	return filepath.Join(s.dataDir, "packages", kind, namespace, name, version+".pkg")
 }
 
 func (s *Storage) linkOrCopy(src, dst string) error {

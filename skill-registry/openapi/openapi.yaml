@@ -107,6 +107,138 @@ paths:
               schema:
                 $ref: '#/components/schemas/SkillList'
 
+  /api/v1/artifacts:
+    get:
+      summary: List generic artifacts
+      operationId: listArtifacts
+      tags: [Artifacts]
+      parameters:
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [skill, agent, flow, prompt, tool, bundle]
+        - name: q
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Artifact list
+
+  /api/v1/artifacts/{kind}/{namespace}/{name}:
+    get:
+      summary: Get artifact metadata, versions, and dist-tags
+      operationId: getArtifact
+      tags: [Artifacts]
+      responses:
+        '200':
+          description: Artifact details
+
+  /api/v1/artifacts/{kind}/{namespace}/{name}/versions/{version}:
+    get:
+      summary: Resolve an exact version, dist-tag, or SemVer range
+      operationId: getArtifactVersion
+      tags: [Artifacts]
+      responses:
+        '200':
+          description: Resolved artifact version
+    put:
+      summary: Publish an immutable artifact version
+      operationId: publishArtifact
+      tags: [Artifacts]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema: {type: string, format: binary}
+          application/zip:
+            schema: {type: string, format: binary}
+      responses:
+        '201':
+          description: Artifact published
+
+  /api/v1/artifacts/{kind}/{namespace}/{name}/versions/{version}/graph:
+    get:
+      summary: Get the resolved dependency graph
+      operationId: artifactGraph
+      tags: [Artifacts]
+      responses:
+        '200':
+          description: Dependency graph
+
+  /api/v1/artifacts/{kind}/{namespace}/{name}/versions/{version}/lockfile:
+    get:
+      summary: Get the digest-pinned lockfile
+      operationId: artifactLockfile
+      tags: [Artifacts]
+      responses:
+        '200':
+          description: Artifact lockfile
+
+  /api/v1/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations:
+    get:
+      summary: List signature, scan, provenance, and SBOM attestations
+      operationId: listArtifactAttestations
+      tags: [Artifacts]
+      responses:
+        '200':
+          description: Attestations
+    post:
+      summary: Record an artifact attestation
+      operationId: createArtifactAttestation
+      tags: [Artifacts]
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Attestation recorded
+
+  /api/v1/artifacts/{kind}/{namespace}/{name}/promotions:
+    post:
+      summary: Promote an artifact version to a channel
+      operationId: promoteArtifact
+      tags: [Artifacts]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Artifact promoted
+
+  /api/v1/namespaces/{namespace}/members:
+    get:
+      summary: List namespace ACL members
+      tags: [Governance]
+      responses:
+        '200':
+          description: Namespace members
+    put:
+      summary: Add or update a namespace member
+      tags: [Governance]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Member updated
+
+  /api/v1/namespaces/{namespace}/webhooks:
+    get:
+      summary: List namespace webhooks
+      tags: [Governance]
+      responses:
+        '200':
+          description: Webhooks
+    post:
+      summary: Register a namespace webhook
+      tags: [Governance]
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Webhook registered
+
   /api/v1/skills/{namespace}/{name}:
     get:
       summary: Get skill details
@@ -195,12 +327,6 @@ paths:
           required: true
           schema:
             type: string
-        - name: force
-          in: query
-          description: Force overwrite existing version
-          schema:
-            type: boolean
-            default: false
       requestBody:
         required: true
         content:
@@ -266,6 +392,38 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/skills/{namespace}/{name}/dist-tags:
+    get:
+      summary: List dist-tags for a skill
+      operationId: listDistTags
+      tags:
+        - DistTags
+      responses:
+        '200':
+          description: Mapping of channel names to immutable versions
+
+  /api/v1/skills/{namespace}/{name}/dist-tags/{tag}:
+    put:
+      summary: Assign a dist-tag to a published version
+      operationId: setDistTag
+      tags:
+        - DistTags
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version:
+                  type: string
+      responses:
+        '200':
+          description: Dist-tag updated
 
   /api/v1/skills/{namespace}/{name}/versions/{version}/download:
     get:
@@ -371,7 +529,7 @@ components:
           type: array
           items:
             type: string
-          example: [publish, list, download, validate, delete]
+          example: [publish, list, download, validate, delete, dist-tags, download-counts, immutable-versions]
 
     Skill:
       type: object

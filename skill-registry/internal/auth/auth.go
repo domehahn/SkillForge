@@ -15,7 +15,7 @@ const scopesKey contextKey = "scopes"
 
 // Authenticator handles token-based authentication
 type Authenticator struct {
-	enabled bool
+	enabled  bool
 	userRepo *UserRepository
 }
 
@@ -25,9 +25,9 @@ func NewAuthenticator(enabled bool, db *sql.DB) (*Authenticator, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Authenticator{
-		enabled: enabled,
+		enabled:  enabled,
 		userRepo: userRepo,
 	}, nil
 }

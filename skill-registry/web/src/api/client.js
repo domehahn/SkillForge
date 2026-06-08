@@ -36,3 +36,26 @@ export async function fetchMetadata() {
   if (!response.ok) throw new Error('Failed to fetch metadata');
   return response.json();
 }
+
+export async function fetchArtifacts(params = {}) {
+  const query = new URLSearchParams();
+  if (params.q) query.append('q', params.q);
+  if (params.kind) query.append('kind', params.kind);
+  if (params.namespace) query.append('namespace', params.namespace);
+  if (params.limit) query.append('limit', params.limit);
+  const response = await fetch(`${API_BASE}/artifacts?${query}`);
+  if (!response.ok) throw new Error('Failed to fetch artifacts');
+  return response.json();
+}
+
+export async function fetchArtifactDetails(kind, namespace, name) {
+  const response = await fetch(`${API_BASE}/artifacts/${kind}/${namespace}/${name}`);
+  if (!response.ok) throw new Error('Failed to fetch artifact');
+  return response.json();
+}
+
+export async function fetchArtifactGraph(kind, namespace, name, version = 'latest') {
+  const response = await fetch(`${API_BASE}/artifacts/${kind}/${namespace}/${name}/versions/${version}/graph`);
+  if (!response.ok) throw new Error('Failed to fetch dependency graph');
+  return response.json();
+}

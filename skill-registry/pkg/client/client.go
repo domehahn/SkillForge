@@ -50,9 +50,19 @@ func (c *Client) doRequest(method, path string, body io.Reader, headers map[stri
 
 // Publish publishes a skill package
 func (c *Client) Publish(namespace, name, version string, data []byte, contentType string) (*metadata.SkillVersion, error) {
+	return c.PublishWithOptions(namespace, name, version, data, contentType, false)
+}
+
+func (c *Client) PublishWithOptions(namespace, name, version string, data []byte, contentType string, force bool, signature ...string) (*metadata.SkillVersion, error) {
 	path := fmt.Sprintf("/api/v1/skills/%s/%s/versions/%s", namespace, name, version)
+	if force {
+		path += "?force=true"
+	}
 	headers := map[string]string{
 		"Content-Type": contentType,
+	}
+	if len(signature) > 0 && signature[0] != "" {
+		headers["X-SkillForge-Signature"] = signature[0]
 	}
 
 	resp, err := c.doRequest("PUT", path, bytes.NewReader(data), headers)
@@ -127,27 +137,82 @@ func (c *Client) GetSkill(namespace, name string) (*metadata.Skill, []metadata.S
 }
 
 // Download downloads a skill package
-func (c *Client) Download(namespace, name, version string) ([]byte, string, error) {
+func (c *Client) Download(namespace, name, version string) ([]byte, string, string, error) {
 	path := fmt.Sprintf("/api/v1/skills/%s/%s/versions/%s/download", namespace, name, version)
 
 	resp, err := c.doRequest("GET", path, nil, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, "", fmt.Errorf("download failed: %s", string(body))
+		return nil, "", "", fmt.Errorf("download failed: %s", string(body))
 	}
 
 	digest := resp.Header.Get("X-Skill-Digest-SHA256")
+	contentType := resp.Header.Get("Content-Type")
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 
-	return data, digest, nil
+	return data, digest, contentType, nil
+}
+
+func (c *Client) ListDistTags(namespace, name string) (map[string]string, error) {
+	path := fmt.Sprintf("/api/v1/skills/%s/%s/dist-tags", namespace, name)
+	resp, err := c.doRequest("GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("list dist-tags failed: %s", string(body))
+	}
+	var result struct {
+		DistTags map[string]string `json:"dist_tags"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	return result.DistTags, err
+}
+
+func (c *Client) SetDistTag(namespace, name, tag, version string) error {
+	data, err := json.Marshal(map[string]string{"version": version})
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/api/v1/skills/%s/%s/dist-tags/%s", namespace, name, tag)
+	resp, err := c.doRequest("PUT", path, bytes.NewReader(data), map[string]string{"Content-Type": "application/json"})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("set dist-tag failed: %s", string(body))
+	}
+	return nil
+}
+
+func (c *Client) Governance(action, namespace, name, version, reason string) error {
+	data, err := json.Marshal(map[string]string{"reason": reason})
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/api/v1/skills/%s/%s/versions/%s/%s", namespace, name, version, action)
+	resp, err := c.doRequest("POST", path, bytes.NewReader(data), map[string]string{"Content-Type": "application/json"})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s failed: %s", action, string(body))
+	}
+	return nil
 }
 
 // Validate validates a skill package
@@ -173,23 +238,23 @@ func (c *Client) Validate(data []byte, contentType string) (*validation.Validati
 
 // LoginResponse represents the login API response
 type LoginResponse struct {
-	Token     string    `json:"token"`
-	User      string    `json:"user"`
-	Role      string    `json:"role"`
-	Scopes    []string  `json:"scopes"`
-	ExpiresAt *string   `json:"expires_at,omitempty"`
+	Token     string   `json:"token"`
+	User      string   `json:"user"`
+	Role      string   `json:"role"`
+	Scopes    []string `json:"scopes"`
+	ExpiresAt *string  `json:"expires_at,omitempty"`
 }
 
 // TokenResponse represents a token
 type TokenResponse struct {
-	ID        int64     `json:"id"`
-	UserID    int64     `json:"user_id"`
-	Name      string    `json:"name"`
-	Token     string    `json:"token,omitempty"`
-	Scopes    []string  `json:"scopes"`
-	CreatedAt string    `json:"created_at"`
-	ExpiresAt *string   `json:"expires_at,omitempty"`
-	RevokedAt *string   `json:"revoked_at,omitempty"`
+	ID        int64    `json:"id"`
+	UserID    int64    `json:"user_id"`
+	Name      string   `json:"name"`
+	Token     string   `json:"token,omitempty"`
+	Scopes    []string `json:"scopes"`
+	CreatedAt string   `json:"created_at"`
+	ExpiresAt *string  `json:"expires_at,omitempty"`
+	RevokedAt *string  `json:"revoked_at,omitempty"`
 }
 
 // Login authenticates with username and password
@@ -198,7 +263,7 @@ func (c *Client) Login(username, password string) (*LoginResponse, error) {
 		"username": username,
 		"password": password,
 	}
-	
+
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, err
@@ -294,7 +359,7 @@ func (c *Client) ListTokens() ([]TokenResponse, error) {
 // RevokeToken revokes a token by ID
 func (c *Client) RevokeToken(tokenID int64) error {
 	path := fmt.Sprintf("/api/v1/tokens/%d", tokenID)
-	
+
 	resp, err := c.doRequest("DELETE", path, nil, nil)
 	if err != nil {
 		return err

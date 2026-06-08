@@ -20,7 +20,7 @@ function SkillCard({ skill }) {
         )}
         
         <div className="version">
-          Latest: {skill.latest_version || 'N/A'}
+          Latest: {skill.latest_version || 'N/A'} · {skill.downloads || 0} pulls
         </div>
       </div>
     </Link>

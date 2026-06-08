@@ -92,13 +92,47 @@ func TestPublishDuplicate(t *testing.T) {
 		t.Error("Expected duplicate publish to fail")
 	}
 
-	// Publish again with force
+	// Published versions remain immutable, even with force.
 	_, err = reg.Publish(ctx, "test", "hello-skill", "1.0.0", data, "tgz", PublishOptions{
 		CreatedBy: "test-user",
 		Force:     true,
 	})
+	if err == nil {
+		t.Error("Expected forced duplicate publish to fail")
+	}
+}
+
+func TestDistTagsAndDownloadCount(t *testing.T) {
+	reg, cleanup := setupTestRegistry(t)
+	defer cleanup()
+	ctx := context.Background()
+	data := createTestPackage(t)
+
+	if _, err := reg.Publish(ctx, "test", "hello-skill", "1.0.0", data, "tgz", PublishOptions{CreatedBy: "test-user"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.SetDistTag(ctx, "test", "hello-skill", "stable", "1.0.0", "test-user"); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := reg.ListDistTags(ctx, "test", "hello-skill")
 	if err != nil {
-		t.Errorf("Publish with force failed: %v", err)
+		t.Fatal(err)
+	}
+	if tags["latest"] != "1.0.0" || tags["stable"] != "1.0.0" {
+		t.Fatalf("unexpected tags: %#v", tags)
+	}
+	if _, _, err := reg.Download(ctx, "test", "hello-skill", "stable"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := reg.Download(ctx, "test", "hello-skill", "latest"); err != nil {
+		t.Fatal(err)
+	}
+	skill, versions, err := reg.GetSkill(ctx, "test", "hello-skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skill.Downloads != 2 || versions[0].Downloads != 2 {
+		t.Fatalf("unexpected download counts: skill=%d version=%d", skill.Downloads, versions[0].Downloads)
 	}
 }
 
@@ -164,8 +198,11 @@ func createTestPackage(t *testing.T) []byte {
 	tw := tar.NewWriter(gzw)
 
 	files := map[string]string{
-		"SKILL.md":  "# Hello Skill\n\nA test skill.",
-		"README.md": "# README",
+		"SKILL.md":     "# Hello Skill\n\nA test skill.",
+		"VERSION":      "1.0.0\n",
+		"skill.yaml":   "name: hello-skill\nnamespace: test\nversion: 1.0.0\ndescription: A test skill.\nowners:\n  - test-team\nlicense: MIT\ncompatible_with:\n  - codex\nentrypoint: SKILL.md\nsecurity:\n  requires_network: false\n  requires_secrets: false\n  writes_files: false\n  runs_commands: false\n",
+		"CHANGELOG.md": "# Changelog\n\n## 1.0.0\n\n### Added\n- Initial test skill.\n",
+		"README.md":    "# README",
 	}
 
 	for name, content := range files {

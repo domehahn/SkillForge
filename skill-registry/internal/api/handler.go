@@ -1,12 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +16,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/skillforge/skill-registry/internal/auth"
 	"github.com/skillforge/skill-registry/internal/config"
+	"github.com/skillforge/skill-registry/internal/metadata"
 	"github.com/skillforge/skill-registry/internal/registry"
+	"github.com/skillforge/skill-registry/internal/validation"
 )
 
 // Handler handles HTTP requests
@@ -44,6 +48,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/metadata", h.GetMetadata)
+		r.Get("/capabilities", h.GetCapabilities)
 
 		// Auth endpoints (no authentication required)
 		r.Post("/auth/login", h.Login)
@@ -51,8 +56,18 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		// Public read endpoints (no auth required)
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware())
+			r.Get("/artifacts", h.ListArtifacts)
+			r.Get("/artifacts/{kind}/{namespace}/{name}", h.GetArtifact)
+			r.Get("/artifacts/{kind}/{namespace}/{name}/versions/{version}", h.GetArtifactVersion)
+			r.Get("/artifacts/{kind}/{namespace}/{name}/versions/{version}/download", h.DownloadArtifact)
+			r.Get("/artifacts/{kind}/{namespace}/{name}/versions/{version}/graph", h.ArtifactGraph)
+			r.Get("/artifacts/{kind}/{namespace}/{name}/versions/{version}/lockfile", h.ArtifactLockfile)
+			r.Get("/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations", h.ListArtifactAttestations)
+			r.Get("/artifacts/{kind}/{namespace}/{name}/promotions", h.ListPromotions)
 			r.Get("/skills", h.ListSkills)
 			r.Get("/skills/{namespace}/{name}", h.GetSkill)
+			r.Get("/skills/{namespace}/{name}/resolve", h.ResolveSkill)
+			r.Get("/skills/{namespace}/{name}/dist-tags", h.ListDistTags)
 			r.Get("/skills/{namespace}/{name}/versions/{version}", h.GetVersion)
 			r.Get("/skills/{namespace}/{name}/versions/{version}/download", h.Download)
 		})
@@ -70,6 +85,18 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Use(h.auth.Middleware("write"))
 			r.Put("/skills/{namespace}/{name}/versions/{version}", h.Publish)
 			r.Post("/validate", h.Validate)
+			r.Put("/skills/{namespace}/{name}/dist-tags/{tag}", h.SetDistTag)
+			r.Post("/skills/{namespace}/{name}/versions/{version}/deprecate", h.DeprecateVersion)
+			r.Post("/skills/{namespace}/{name}/versions/{version}/yank", h.YankVersion)
+			r.Post("/skills/{namespace}/{name}/versions/{version}/unyank", h.UnyankVersion)
+			r.Put("/artifacts/{kind}/{namespace}/{name}/versions/{version}", h.PublishArtifact)
+			r.Post("/artifacts/{kind}/{namespace}/{name}/promotions", h.PromoteArtifact)
+			r.Put("/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations", h.AttestArtifact)
+			r.Post("/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations", h.CreateArtifactAttestation)
+			r.Get("/namespaces/{namespace}/members", h.ListNamespaceMembers)
+			r.Put("/namespaces/{namespace}/members", h.UpsertNamespaceMember)
+			r.Get("/namespaces/{namespace}/webhooks", h.ListWebhooks)
+			r.Post("/namespaces/{namespace}/webhooks", h.CreateWebhook)
 		})
 
 		// Delete endpoints (require auth with delete scope)
@@ -102,14 +129,38 @@ func (h *Handler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 	}
 
 	metadata := RegistryMetadata{
-		Name:                 "Skill Registry",
-		Version:              "1.0.0",
+		Name:                  "Skill Registry",
+		Version:               "1.0.0",
 		SupportedPackageTypes: h.config.Storage.AllowedPackageTypes,
-		AuthMode:             authMode,
-		Capabilities:         []string{"publish", "list", "download", "validate", "delete"},
+		AuthMode:              authMode,
+		Capabilities: []string{
+			"artifacts", "skills", "agents", "flows", "prompts", "tools", "bundles",
+			"dependencies", "lockfiles", "graphs", "promotions", "namespace-acls",
+			"webhooks", "attestations", "oci-descriptors", "immutable-versions",
+		},
 	}
 
 	WriteJSON(w, http.StatusOK, metadata)
+}
+
+func (h *Handler) GetCapabilities(w http.ResponseWriter, r *http.Request) {
+	authMode := "disabled"
+	if h.config.Auth.Enabled {
+		authMode = "token"
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"api_version":         "v1",
+		"package_formats":     h.config.Storage.AllowedPackageTypes,
+		"auth_mode":           authMode,
+		"auth_enabled":        h.config.Auth.Enabled,
+		"max_package_size_mb": h.config.Storage.MaxPackageSizeMB,
+		"supported_platforms": validation.SupportedPlatforms(),
+		"signing":             "local-hook",
+		"deprecate_yank":      true,
+		"lock_resolution":     true,
+		"immutable_versions":  true,
+		"production_latest":   false,
+	})
 }
 
 // Publish handles skill publishing
@@ -145,9 +196,10 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 	// Publish
 	actor := auth.ActorFromContext(ctx)
 	skillVersion, err := h.registry.Publish(ctx, namespace, name, version, data, packageType, registry.PublishOptions{
-		Force:     force,
-		CreatedBy: actor,
-		Source:    "local",
+		Force:           force,
+		CreatedBy:       actor,
+		Source:          "local",
+		SignatureDigest: r.Header.Get("X-SkillForge-Signature"),
 	})
 	if err != nil {
 		if strings.Contains(err.Error(), "already exists") {
@@ -176,6 +228,9 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	if namespace := r.URL.Query().Get("namespace"); namespace != "" {
 		filters["namespace"] = namespace
 	}
+	if tag := r.URL.Query().Get("tag"); tag != "" {
+		filters["tag"] = tag
+	}
 	if deprecated := r.URL.Query().Get("deprecated"); deprecated == "true" {
 		filters["deprecated"] = true
 	} else if deprecated == "false" {
@@ -202,6 +257,68 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, skills)
 }
 
+func (h *Handler) ResolveSkill(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	namespace := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+	constraint := r.URL.Query().Get("constraint")
+	if constraint == "" {
+		constraint = "*"
+	}
+	skill, versions, err := h.registry.GetSkill(ctx, namespace, name)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, "SKILL_NOT_FOUND", err.Error())
+		return
+	}
+	resolved := resolveAPIVersion(versions, constraint)
+	if resolved == nil {
+		WriteError(w, http.StatusNotFound, "NO_MATCHING_VERSION", "no version satisfies the requested constraint")
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"skill":      skill,
+		"version":    resolved,
+		"constraint": constraint,
+	})
+}
+
+func (h *Handler) DeprecateVersion(w http.ResponseWriter, r *http.Request) {
+	h.governVersion(w, r, "deprecate")
+}
+
+func (h *Handler) YankVersion(w http.ResponseWriter, r *http.Request) {
+	h.governVersion(w, r, "yank")
+}
+
+func (h *Handler) UnyankVersion(w http.ResponseWriter, r *http.Request) {
+	h.governVersion(w, r, "unyank")
+}
+
+func (h *Handler) governVersion(w http.ResponseWriter, r *http.Request, action string) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	namespace := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+	version := chi.URLParam(r, "version")
+	actor := auth.ActorFromContext(r.Context())
+	var err error
+	switch action {
+	case "deprecate":
+		err = h.registry.DeprecateVersion(r.Context(), namespace, name, version, body.Reason, actor)
+	case "yank":
+		err = h.registry.YankVersion(r.Context(), namespace, name, version, body.Reason, actor)
+	case "unyank":
+		err = h.registry.UnyankVersion(r.Context(), namespace, name, version, actor)
+	}
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "GOVERNANCE_FAILED", err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": action})
+}
+
 // GetSkill handles retrieving a skill with its versions
 func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -219,9 +336,16 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	distTags, err := h.registry.ListDistTags(ctx, namespace, name)
+	if err != nil {
+		h.logger.Error("list dist-tags failed", "error", err)
+		WriteError(w, http.StatusInternalServerError, "GET_FAILED", "Failed to get dist-tags")
+		return
+	}
 	response := map[string]interface{}{
-		"skill":    skill,
-		"versions": versions,
+		"skill":     skill,
+		"versions":  versions,
+		"dist_tags": distTags,
 	}
 
 	WriteJSON(w, http.StatusOK, response)
@@ -267,14 +391,60 @@ func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set headers
-	w.Header().Set("Content-Type", "application/gzip")
+	contentType := "application/gzip"
+	extension := "tgz"
+	if skillVersion.PackageType == "zip" {
+		contentType = "application/zip"
+		extension = "zip"
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("X-Skill-Digest-SHA256", skillVersion.DigestSHA256)
-	filename := fmt.Sprintf("%s-%s-%s.tgz", namespace, name, version)
+	filename := fmt.Sprintf("%s-%s-%s.%s", namespace, name, skillVersion.Version, extension)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
+}
+
+func (h *Handler) ListDistTags(w http.ResponseWriter, r *http.Request) {
+	tags, err := h.registry.ListDistTags(r.Context(), chi.URLParam(r, "namespace"), chi.URLParam(r, "name"))
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, "GET_FAILED", "Failed to list dist-tags")
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"dist_tags": tags})
+}
+
+func (h *Handler) SetDistTag(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Version string `json:"version"`
+	}
+	if err := ParseJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+	err := h.registry.SetDistTag(
+		r.Context(),
+		chi.URLParam(r, "namespace"),
+		chi.URLParam(r, "name"),
+		chi.URLParam(r, "tag"),
+		req.Version,
+		auth.ActorFromContext(r.Context()),
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			WriteError(w, http.StatusNotFound, "NOT_FOUND", err.Error())
+			return
+		}
+		WriteError(w, http.StatusBadRequest, "INVALID_DIST_TAG", err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"tag": chi.URLParam(r, "tag"), "version": req.Version})
 }
 
 // DeleteVersion handles deleting a version
@@ -410,7 +580,7 @@ func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
 	if user.Role == "admin" {
 		allowedScopes = append(allowedScopes, "delete")
 	}
-	
+
 	for _, scope := range req.Scopes {
 		if !contains(allowedScopes, scope) {
 			WriteError(w, http.StatusForbidden, "INVALID_SCOPE", fmt.Sprintf("Scope '%s' not allowed for your role", scope))
@@ -505,7 +675,7 @@ func (h *Handler) ServeStaticFiles(r chi.Router) {
 
 	// Serve static files
 	fileServer := http.FileServer(http.Dir(webDir))
-	
+
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
 		// If file exists, serve it
 		path := filepath.Join(webDir, req.URL.Path)
@@ -529,4 +699,63 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
+}
+
+func resolveAPIVersion(versions []metadata.SkillVersion, constraint string) *metadata.SkillVersion {
+	var candidates []metadata.SkillVersion
+	var deprecated []metadata.SkillVersion
+	for _, version := range versions {
+		if version.Yanked {
+			continue
+		}
+		if !(constraint == "" || constraint == "*" || constraint == "latest" || version.Version == constraint || apiCaretAllows(constraint, version.Version)) {
+			continue
+		}
+		if version.Deprecated {
+			deprecated = append(deprecated, version)
+		} else {
+			candidates = append(candidates, version)
+		}
+	}
+	if len(candidates) == 0 {
+		candidates = deprecated
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool { return apiCompareVersion(candidates[i].Version, candidates[j].Version) > 0 })
+	return &candidates[0]
+}
+
+func apiCaretAllows(constraint, version string) bool {
+	if !strings.HasPrefix(constraint, "^") {
+		return false
+	}
+	base := strings.TrimPrefix(constraint, "^")
+	bp, vp := apiVersionParts(base), apiVersionParts(version)
+	return vp[0] == bp[0] && apiCompareVersion(version, base) >= 0
+}
+
+func apiCompareVersion(a, b string) int {
+	ap, bp := apiVersionParts(a), apiVersionParts(b)
+	for i := 0; i < 3; i++ {
+		if ap[i] > bp[i] {
+			return 1
+		}
+		if ap[i] < bp[i] {
+			return -1
+		}
+	}
+	return strings.Compare(a, b)
+}
+
+func apiVersionParts(v string) [3]int {
+	base := strings.Split(strings.Split(v, "+")[0], "-")[0]
+	parts := strings.Split(base, ".")
+	var out [3]int
+	for i := 0; i < len(parts) && i < 3; i++ {
+		n, _ := strconv.Atoi(parts[i])
+		out[i] = n
+	}
+	return out
 }

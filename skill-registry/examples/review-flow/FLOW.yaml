@@ -1,0 +1,11 @@
+apiVersion: skillforge.dev/v1
+kind: flow
+metadata:
+  namespace: demo
+  name: review-flow
+  version: 1.0.0
+spec:
+  entrypoint: FLOW.yaml
+  steps:
+    - id: review
+      uses: agent://demo/reviewer-agent@0.1.0

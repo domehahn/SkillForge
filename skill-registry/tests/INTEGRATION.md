@@ -15,7 +15,7 @@ This document outlines integration test scenarios for the Skill Registry.
 #### 2. Duplicate Version Handling
 - Publish version 1.0.0
 - Attempt to publish 1.0.0 again (should fail)
-- Publish with force flag (should succeed)
+- Attempt to force-publish 1.0.0 again (should fail because versions are immutable)
 
 #### 3. Version Resolution
 - Publish versions 1.0.0, 1.1.0, 2.0.0
@@ -46,13 +46,13 @@ This document outlines integration test scenarios for the Skill Registry.
 - Pagination
 
 #### 7. CLI Integration
-- skillctl login
-- skillctl publish (directory)
-- skillctl publish (archive)
-- skillctl search
-- skillctl info
-- skillctl install
-- skillctl validate
+- skforge login
+- skforge publish (directory)
+- skforge publish (archive)
+- skforge search
+- skforge info
+- skforge install
+- skforge validate
 
 ### Running Integration Tests
 

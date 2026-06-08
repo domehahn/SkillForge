@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
-import { fetchSkills } from '../api/client'
-import SkillCard from '../components/SkillCard'
+import { fetchArtifacts } from '../api/client'
+import ArtifactCard from '../components/ArtifactCard'
 
 function HomePage() {
-  const [skills, setSkills] = useState([])
+  const [artifacts, setArtifacts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [kind, setKind] = useState('')
 
   useEffect(() => {
     loadSkills()
@@ -16,8 +17,8 @@ function HomePage() {
     setLoading(true)
     setError(null)
     try {
-      const data = await fetchSkills({ q: query, limit: 100 })
-      setSkills(data.skills || [])
+      const data = await fetchArtifacts({ q: query, kind, limit: 100 })
+      setArtifacts(data.artifacts || [])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -34,14 +35,14 @@ function HomePage() {
     <div className="container">
       <div className="stats">
         <div className="stat-card">
-          <div className="number">{skills.length}</div>
-          <div className="label">Skills Available</div>
+          <div className="number">{artifacts.length}</div>
+          <div className="label">Artifacts Available</div>
         </div>
         <div className="stat-card">
           <div className="number">
-            {skills.reduce((sum, skill) => sum + (skill.versions?.length || 0), 0)}
+            {artifacts.reduce((sum, artifact) => sum + (artifact.downloads || 0), 0)}
           </div>
-          <div className="label">Total Versions</div>
+          <div className="label">Total Pulls</div>
         </div>
       </div>
 
@@ -52,6 +53,10 @@ function HomePage() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        <select value={kind} onChange={(e) => setKind(e.target.value)}>
+          <option value="">All kinds</option>
+          {['skill', 'agent', 'flow', 'prompt', 'tool', 'bundle'].map((value) => <option key={value} value={value}>{value}</option>)}
+        </select>
         <button type="submit">Search</button>
       </form>
 
@@ -63,17 +68,17 @@ function HomePage() {
         </div>
       )}
 
-      {!loading && !error && skills.length === 0 && (
+      {!loading && !error && artifacts.length === 0 && (
         <div className="empty">
-          <h3>No skills found</h3>
-          <p>Try a different search query or publish your first skill</p>
+          <h3>No artifacts found</h3>
+          <p>Try a different search query or publish your first artifact</p>
         </div>
       )}
 
-      {!loading && !error && skills.length > 0 && (
+      {!loading && !error && artifacts.length > 0 && (
         <div className="skills-grid">
-          {skills.map((skill) => (
-            <SkillCard key={`${skill.namespace}/${skill.name}`} skill={skill} />
+          {artifacts.map((artifact) => (
+            <ArtifactCard key={`${artifact.kind}/${artifact.namespace}/${artifact.name}`} artifact={artifact} />
           ))}
         </div>
       )}

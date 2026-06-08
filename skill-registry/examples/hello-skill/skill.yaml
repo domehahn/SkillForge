@@ -1,0 +1,20 @@
+name: documentation-review
+namespace: default
+version: 1.0.0
+description: Reviews documentation against internal standards.
+owners:
+  - platform-team
+license: internal
+compatible_with:
+  - codex
+  - claude-code
+entrypoint: SKILL.md
+tags:
+  - documentation
+  - review
+  - quality
+security:
+  requires_network: false
+  requires_secrets: false
+  writes_files: false
+  runs_commands: false

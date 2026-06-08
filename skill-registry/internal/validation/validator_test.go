@@ -82,8 +82,8 @@ func TestValidatePackage_MissingSkillMD(t *testing.T) {
 
 func TestValidatePackage_Valid(t *testing.T) {
 	data := createTestTarGz(t, map[string]string{
-		"SKILL.md":   "# Test Skill\n\nThis is a test.",
-		"README.md":  "# README",
+		"SKILL.md":        "# Test Skill\n\nThis is a test.",
+		"README.md":       "# README",
 		"scripts/test.sh": "#!/bin/bash\necho test",
 	})
 
@@ -101,7 +101,7 @@ func TestValidatePackage_Valid(t *testing.T) {
 
 func TestValidatePackage_BlockedExtension(t *testing.T) {
 	data := createTestTarGz(t, map[string]string{
-		"SKILL.md":      "# Test Skill",
+		"SKILL.md":    "# Test Skill",
 		"malware.exe": "fake exe content",
 	})
 
@@ -119,7 +119,7 @@ func TestValidatePackage_BlockedExtension(t *testing.T) {
 
 func TestValidatePackage_PathTraversal(t *testing.T) {
 	data := createTestTarGz(t, map[string]string{
-		"SKILL.md":      "# Test Skill",
+		"SKILL.md":            "# Test Skill",
 		"../../../etc/passwd": "malicious",
 	})
 
@@ -347,9 +347,9 @@ func TestValidatePackage_TooLarge(t *testing.T) {
 	files := map[string]string{
 		"SKILL.md": "# Test Skill",
 	}
-	
+
 	data := createTestTarGz(t, files)
-	
+
 	// Manually pad to 2MB to ensure it exceeds 1MB limit
 	padding := make([]byte, 2*1024*1024-len(data))
 	for i := range padding {
@@ -567,7 +567,7 @@ name: partial-skill
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			manifest := validator.extractManifest([]byte(tt.content))
-			
+
 			if manifest.Name != tt.wantName {
 				t.Errorf("Name = %q, want %q", manifest.Name, tt.wantName)
 			}

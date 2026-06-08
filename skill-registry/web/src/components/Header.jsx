@@ -16,7 +16,7 @@ function Header() {
       <div className="container">
         <div>
           <Link to="/" style={{ textDecoration: 'none', color: 'white' }}>
-            <h1>🎯 Skill Registry</h1>
+            <h1>SkillForge Registry</h1>
           </Link>
           {metadata && (
             <div style={{ fontSize: '14px', marginTop: '4px', opacity: 0.9 }}>
@@ -26,7 +26,7 @@ function Header() {
         </div>
         <nav>
           <Link to="/">Browse</Link>
-          <a href="/api/v1/skills" target="_blank" rel="noopener noreferrer">API</a>
+          <a href="/api/v1/artifacts" target="_blank" rel="noopener noreferrer">API</a>
         </nav>
       </div>
     </header>

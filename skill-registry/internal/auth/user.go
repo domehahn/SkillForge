@@ -17,7 +17,7 @@ import (
 type User struct {
 	ID           int64     `json:"id"`
 	Username     string    `json:"username"`
-	PasswordHash string    `json:"-"` // Never expose in JSON
+	PasswordHash string    `json:"-"`    // Never expose in JSON
 	Role         string    `json:"role"` // 'admin', 'user'
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -25,13 +25,13 @@ type User struct {
 
 // Token represents an API token
 type Token struct {
-	ID        int64     `json:"id"`
-	UserID    int64     `json:"user_id"`
-	Name      string    `json:"name"`
-	Token     string    `json:"token,omitempty"` // Only shown on creation
-	TokenHash string    `json:"-"`
-	Scopes    []string  `json:"scopes"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        int64      `json:"id"`
+	UserID    int64      `json:"user_id"`
+	Name      string     `json:"name"`
+	Token     string     `json:"token,omitempty"` // Only shown on creation
+	TokenHash string     `json:"-"`
+	Scopes    []string   `json:"scopes"`
+	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
 }
@@ -122,7 +122,7 @@ func (r *UserRepository) GetUser(ctx context.Context, username string) (*User, e
 		FROM users
 		WHERE username = ?
 	`, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found")
 	}
@@ -140,7 +140,7 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id int64) (*User, erro
 		FROM users
 		WHERE id = ?
 	`, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.UpdatedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found")
 	}
@@ -231,7 +231,7 @@ func (r *UserRepository) ValidateToken(ctx context.Context, token string) (*User
 		FROM tokens
 		WHERE token_hash = ?
 	`, tokenHash).Scan(&userID, &scopesStr, &expiresAt, &revokedAt)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, nil, fmt.Errorf("invalid token")
 	}
@@ -283,7 +283,7 @@ func (r *UserRepository) ListTokens(ctx context.Context, userID int64) ([]*Token
 		var scopesStr string
 		var expiresAt, revokedAt sql.NullTime
 
-		if err := rows.Scan(&token.ID, &token.UserID, &token.Name, &token.TokenHash, 
+		if err := rows.Scan(&token.ID, &token.UserID, &token.Name, &token.TokenHash,
 			&scopesStr, &token.CreatedAt, &expiresAt, &revokedAt); err != nil {
 			return nil, err
 		}

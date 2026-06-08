@@ -15,10 +15,10 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 		if requestID == "" {
 			requestID = generateRequestID()
 		}
-		
+
 		ctx := WithRequestID(r.Context(), requestID)
 		w.Header().Set("X-Request-ID", requestID)
-		
+
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -28,13 +28,13 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-			
+
 			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-			
+
 			next.ServeHTTP(wrapped, r)
-			
+
 			duration := time.Since(start)
-			
+
 			logCtx := LoggerWithContext(logger, r.Context())
 			logCtx.Info("http_request",
 				"method", r.Method,

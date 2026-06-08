@@ -26,9 +26,9 @@ type ServerConfig struct {
 
 // StorageConfig holds storage configuration
 type StorageConfig struct {
-	DataDir              string   `yaml:"data_dir"`
-	MaxPackageSizeMB     int      `yaml:"max_package_size_mb"`
-	AllowedPackageTypes  []string `yaml:"allowed_package_types"`
+	DataDir             string   `yaml:"data_dir"`
+	MaxPackageSizeMB    int      `yaml:"max_package_size_mb"`
+	AllowedPackageTypes []string `yaml:"allowed_package_types"`
 }
 
 // DatabaseConfig holds database configuration

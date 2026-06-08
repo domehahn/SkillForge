@@ -14,7 +14,7 @@ A complete, production-ready **Skill Registry** system for managing versioned AI
 - Token-based authentication with scopes
 - Audit logging for all write operations
 
-#### 2. **CLI Tool** (`cmd/skillctl/`)
+#### 2. **CLI Tool** (`cmd/skforge/`)
 - Complete command-line interface with 7 commands:
   - `login` - Configure registry credentials
   - `publish` - Publish skills from directory or archive
@@ -23,7 +23,7 @@ A complete, production-ready **Skill Registry** system for managing versioned AI
   - `install` - Download and extract skills
   - `validate` - Validate package structure
   - `version` - Show CLI version
-- Configuration management (~/.skillctl/config.yaml)
+- Configuration management (~/.skforge/config.yaml)
 - Package creation (tar.gz) from directories
 - Digest verification on download
 - Extraction with security checks
@@ -43,6 +43,8 @@ A complete, production-ready **Skill Registry** system for managing versioned AI
   - `skills` - Skill metadata (name, namespace, tags, owners)
   - `skill_versions` - Version-specific data (digest, size, manifest)
   - `audit_log` - Audit trail for all operations
+  - `dist_tags` - Movable channels such as latest, beta, and stable
+  - `download_counts` - Pull counters per skill version
 - Indexes for efficient queries
 - Soft delete (deprecated) and hard delete support
 
@@ -191,23 +193,23 @@ curl http://localhost:8080/api/v1/metadata
 
 ## How to Publish a Skill
 
-### Using the CLI (skillctl)
+### Using the CLI (skforge)
 
 ```bash
 # Build the CLI
 make build
 
 # Option 1: Publish from a directory
-./bin/skillctl publish ./my-skill \
+./bin/skforge publish ./my-skill \
   --registry http://localhost:8080
 
 # Option 2: Publish from an existing archive
-./bin/skillctl publish ./my-skill.tar.gz \
+./bin/skforge publish ./my-skill.tar.gz \
   --registry http://localhost:8080
 
 # With authentication
 export SKILL_REGISTRY_TOKEN=your-token-here
-./bin/skillctl publish ./my-skill \
+./bin/skforge publish ./my-skill \
   --registry http://localhost:8080
 ```
 
@@ -232,12 +234,8 @@ curl -X PUT \
   --data-binary @my-skill/skill.tar.gz \
   http://localhost:8080/api/v1/skills/default/my-skill/versions/1.0.0
 
-# Force overwrite existing version
-curl -X PUT \
-  -H "Content-Type: application/gzip" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  --data-binary @my-skill/skill.tar.gz \
-  "http://localhost:8080/api/v1/skills/default/my-skill/versions/1.0.0?force=true"
+# Published versions are immutable. Publish a new SemVer, then move a dist-tag.
+skforge dist-tag add default/my-skill@1.1.0 latest
 ```
 
 ### Skill Package Requirements
@@ -268,22 +266,22 @@ Documentation goes here...
 
 ## How to Install a Skill
 
-### Using the CLI (skillctl)
+### Using the CLI (skforge)
 
 ```bash
 # Install latest version to default location
-./bin/skillctl install default/my-skill
+./bin/skforge install default/my-skill
 
 # Install specific version
-./bin/skillctl install default/my-skill@1.0.0
+./bin/skforge install default/my-skill@1.0.0
 
 # Install to custom directory
-./bin/skillctl install default/my-skill@1.0.0 \
+./bin/skforge install default/my-skill@1.0.0 \
   --target ./my-skills-dir
 
 # With authentication
 export SKILL_REGISTRY_TOKEN=your-token-here
-./bin/skillctl install default/my-skill@1.0.0
+./bin/skforge install default/my-skill@1.0.0
 ```
 
 ### Using curl
@@ -308,7 +306,7 @@ tar xzf skill.tar.gz -C ./skills/my-skill
 
 ```bash
 # Using CLI
-./bin/skillctl search documentation
+./bin/skforge search documentation
 
 # Using curl
 curl "http://localhost:8080/api/v1/skills?q=documentation"
@@ -327,7 +325,7 @@ curl "http://localhost:8080/api/v1/skills?limit=10&offset=20"
 
 ```bash
 # Using CLI
-./bin/skillctl info default/my-skill
+./bin/skforge info default/my-skill
 
 # Using curl - get skill with all versions
 curl http://localhost:8080/api/v1/skills/default/my-skill
@@ -374,7 +372,7 @@ Use tokens in requests:
 ```bash
 # CLI
 export SKILL_REGISTRY_TOKEN="secret-admin-token-123"
-./bin/skillctl publish ./my-skill
+./bin/skforge publish ./my-skill
 
 # curl
 curl -H "Authorization: Bearer secret-admin-token-123" \
@@ -590,7 +588,7 @@ make tidy           # Tidy go.mod
 skill-registry/
 ├── cmd/
 │   ├── skill-registry/       # Server entry point
-│   └── skillctl/             # CLI tool
+│   └── skforge/             # CLI tool
 ├── internal/
 │   ├── api/                  # HTTP handlers and routing
 │   ├── auth/                 # Authentication
@@ -660,14 +658,14 @@ make compose-up
 make build
 
 # Publish a skill
-./bin/skillctl publish ./examples/hello-skill \
+./bin/skforge publish ./examples/hello-skill \
   --registry http://localhost:8080
 
 # Search for skills
-./bin/skillctl search hello
+./bin/skforge search hello
 
 # Install a skill
-./bin/skillctl install default/hello-skill@1.0.0
+./bin/skforge install default/hello-skill@1.0.0
 ```
 
 ---

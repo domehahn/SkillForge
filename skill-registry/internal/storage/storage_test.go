@@ -116,6 +116,27 @@ func TestStore(t *testing.T) {
 	}
 }
 
+func TestStoreReplacingNamedPackageDoesNotMutateOldBlob(t *testing.T) {
+	storage, cleanup := setupTestStorage(t)
+	defer cleanup()
+
+	oldData := []byte("old immutable content")
+	oldDigest, err := storage.Store("test", "my-skill", "1.0.0", oldData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Store("test", "my-skill", "1.0.0", []byte("new content")); err != nil {
+		t.Fatal(err)
+	}
+	retrieved, err := storage.Retrieve(oldDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(retrieved) != string(oldData) {
+		t.Fatalf("old content-addressed blob was mutated: %q", retrieved)
+	}
+}
+
 func TestStore_LargeData(t *testing.T) {
 	storage, cleanup := setupTestStorage(t)
 	defer cleanup()

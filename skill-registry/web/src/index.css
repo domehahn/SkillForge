@@ -69,6 +69,37 @@ header nav a:hover {
   transition: border-color 0.2s;
 }
 
+.search-bar select {
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: white;
+}
+
+.kind-badge {
+  display: inline-block;
+  margin-bottom: 10px;
+  padding: 4px 9px;
+  border-radius: 5px;
+  background: #eef0ff;
+  color: #5568d3;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.dependency-graph {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid #eee;
+}
+
+.dependency-graph div {
+  margin-top: 8px;
+  color: #555;
+}
+
 .search-bar input:focus {
   outline: none;
   border-color: #667eea;
@@ -172,8 +203,56 @@ header nav a:hover {
   font-size: 14px;
 }
 
+.registry-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.registry-facts span {
+  background: #f0f0f0;
+  border-radius: 16px;
+  color: #555;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.registry-facts .dist-tag {
+  background: #eef0ff;
+  color: #5568d3;
+}
+
 .versions-list {
   margin-top: 30px;
+}
+
+.install-panel {
+  margin-top: 24px;
+  padding: 18px;
+  border-radius: 10px;
+  background: #f4f6ff;
+  border: 1px solid #dfe4ff;
+}
+
+.install-panel h3 {
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.install-panel p {
+  margin-bottom: 12px;
+  color: #555;
+}
+
+.install-panel pre {
+  overflow-x: auto;
+  padding: 14px;
+  border-radius: 8px;
+  background: #1f2430;
+  color: #f8f8f2;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .versions-list h3 {

@@ -43,9 +43,9 @@ func WriteError(w http.ResponseWriter, status int, code, message string, details
 
 // RegistryMetadata represents registry metadata
 type RegistryMetadata struct {
-	Name                 string   `json:"name"`
-	Version              string   `json:"version"`
+	Name                  string   `json:"name"`
+	Version               string   `json:"version"`
 	SupportedPackageTypes []string `json:"supported_package_types"`
-	AuthMode             string   `json:"auth_mode"`
-	Capabilities         []string `json:"capabilities"`
+	AuthMode              string   `json:"auth_mode"`
+	Capabilities          []string `json:"capabilities"`
 }

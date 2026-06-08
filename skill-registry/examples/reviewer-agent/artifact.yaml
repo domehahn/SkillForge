@@ -1,0 +1,16 @@
+apiVersion: skillforge.dev/v1
+kind: agent
+metadata:
+  namespace: demo
+  name: reviewer-agent
+  version: 1.0.0
+  description: Reviews documents using the documentation review skill.
+  tags: [review, documentation]
+spec:
+  entrypoint: AGENT.md
+  runtime: openai
+  dependencies:
+    - kind: skill
+      namespace: demo
+      name: documentation-review
+      version: ^1.0.0

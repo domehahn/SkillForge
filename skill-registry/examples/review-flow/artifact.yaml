@@ -1,0 +1,18 @@
+apiVersion: skillforge.dev/v1
+kind: flow
+metadata:
+  namespace: demo
+  name: review-flow
+  version: 1.0.0
+  description: A reusable document review flow.
+  tags: [flow, review]
+spec:
+  entrypoint: FLOW.yaml
+  dependencies:
+    - kind: agent
+      namespace: demo
+      name: reviewer-agent
+      version: 0.1.0
+  steps:
+    - id: review
+      uses: agent://demo/reviewer-agent@0.1.0

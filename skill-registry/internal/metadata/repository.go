@@ -105,17 +105,179 @@ func (r *Repository) migrate() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_log(created_at);
+
+	CREATE TABLE IF NOT EXISTS dist_tags (
+		skill_id INTEGER NOT NULL,
+		tag TEXT NOT NULL,
+		version TEXT NOT NULL,
+		updated_at DATETIME NOT NULL,
+		updated_by TEXT,
+		FOREIGN KEY (skill_id) REFERENCES skills(id),
+		UNIQUE(skill_id, tag)
+	);
+
+	CREATE TABLE IF NOT EXISTS download_counts (
+		namespace TEXT NOT NULL,
+		name TEXT NOT NULL,
+		version TEXT NOT NULL,
+		count INTEGER NOT NULL DEFAULT 0,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(namespace, name, version)
+	);
+
+	INSERT OR IGNORE INTO dist_tags (skill_id, tag, version, updated_at, updated_by)
+	SELECT id, 'latest', latest_version, updated_at, 'migration'
+	FROM skills
+	WHERE latest_version IS NOT NULL AND latest_version != '';
+
+	CREATE TABLE IF NOT EXISTS artifacts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		kind TEXT NOT NULL,
+		namespace TEXT NOT NULL,
+		name TEXT NOT NULL,
+		description TEXT,
+		latest_version TEXT,
+		visibility TEXT NOT NULL DEFAULT 'public',
+		tags TEXT,
+		owners TEXT,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(kind, namespace, name)
+	);
+
+	CREATE TABLE IF NOT EXISTS artifact_versions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		artifact_id INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		namespace TEXT NOT NULL,
+		name TEXT NOT NULL,
+		version TEXT NOT NULL,
+		digest_sha256 TEXT NOT NULL,
+		package_type TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		entrypoint TEXT,
+		manifest TEXT NOT NULL,
+		lockfile TEXT,
+		oci_descriptor TEXT NOT NULL,
+		signature_status TEXT NOT NULL DEFAULT 'unsigned',
+		scan_status TEXT NOT NULL DEFAULT 'pending',
+		validation_status TEXT NOT NULL DEFAULT 'valid',
+		source TEXT NOT NULL DEFAULT 'local',
+		created_by TEXT,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (artifact_id) REFERENCES artifacts(id),
+		UNIQUE(artifact_id, version)
+	);
+
+	CREATE TABLE IF NOT EXISTS artifact_dist_tags (
+		artifact_id INTEGER NOT NULL,
+		tag TEXT NOT NULL,
+		version TEXT NOT NULL,
+		updated_at DATETIME NOT NULL,
+		updated_by TEXT,
+		FOREIGN KEY (artifact_id) REFERENCES artifacts(id),
+		UNIQUE(artifact_id, tag)
+	);
+
+	CREATE TABLE IF NOT EXISTS artifact_download_counts (
+		artifact_id INTEGER NOT NULL,
+		version TEXT NOT NULL,
+		count INTEGER NOT NULL DEFAULT 0,
+		updated_at DATETIME NOT NULL,
+		UNIQUE(artifact_id, version)
+	);
+
+	CREATE TABLE IF NOT EXISTS promotions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		kind TEXT NOT NULL,
+		namespace TEXT NOT NULL,
+		name TEXT NOT NULL,
+		version TEXT NOT NULL,
+		channel TEXT NOT NULL,
+		actor TEXT,
+		created_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS namespace_members (
+		namespace TEXT NOT NULL,
+		username TEXT NOT NULL,
+		role TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		UNIQUE(namespace, username)
+	);
+
+	CREATE TABLE IF NOT EXISTS webhooks (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		namespace TEXT NOT NULL,
+		url TEXT NOT NULL,
+		events TEXT NOT NULL,
+		active INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS attestations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		artifact_version_id INTEGER NOT NULL,
+		type TEXT NOT NULL,
+		digest TEXT NOT NULL,
+		predicate TEXT,
+		created_by TEXT,
+		created_at DATETIME NOT NULL,
+		FOREIGN KEY (artifact_version_id) REFERENCES artifact_versions(id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_artifacts_lookup ON artifacts(kind, namespace, name);
+	CREATE INDEX IF NOT EXISTS idx_artifact_versions_lookup ON artifact_versions(kind, namespace, name, version);
+
+	INSERT OR IGNORE INTO artifacts (kind, namespace, name, description, latest_version, visibility, tags, owners, created_at, updated_at)
+	SELECT 'skill', namespace, name, description, latest_version, visibility, tags, owners, created_at, updated_at FROM skills;
+
+	INSERT OR IGNORE INTO artifact_versions (
+		artifact_id, kind, namespace, name, version, digest_sha256, package_type, size_bytes,
+		entrypoint, manifest, lockfile, oci_descriptor, signature_status, scan_status,
+		validation_status, source, created_by, created_at
+	)
+	SELECT a.id, 'skill', sv.namespace, sv.name, sv.version, sv.digest_sha256, sv.package_type, sv.size_bytes,
+		sv.entrypoint_path,
+		json_object(
+			'apiVersion', 'skillforge.dev/v1', 'kind', 'skill',
+			'metadata', json_object('namespace', sv.namespace, 'name', sv.name, 'version', sv.version, 'description', sv.description),
+			'spec', json_object('entrypoint', sv.entrypoint_path, 'dependencies', json_array())
+		),
+		json_object('apiVersion', 'skillforge.dev/v1', 'root', 'skill/' || sv.namespace || '/' || sv.name || '@' || sv.version, 'resolved', json_array()),
+		json_object('mediaType', 'application/vnd.skillforge.artifact.manifest.v1+json', 'digest', 'sha256:' || sv.digest_sha256, 'size', sv.size_bytes, 'artifactType', 'application/vnd.skillforge.skill.v1'),
+		sv.signature_status, 'pending', sv.validation_status, sv.source, sv.created_by, sv.created_at
+	FROM skill_versions sv
+	JOIN artifacts a ON a.kind = 'skill' AND a.namespace = sv.namespace AND a.name = sv.name;
+
+	INSERT OR IGNORE INTO artifact_dist_tags (artifact_id, tag, version, updated_at, updated_by)
+	SELECT a.id, dt.tag, dt.version, dt.updated_at, dt.updated_by
+	FROM dist_tags dt JOIN skills s ON s.id = dt.skill_id
+	JOIN artifacts a ON a.kind = 'skill' AND a.namespace = s.namespace AND a.name = s.name;
 	`
 
-	_, err := r.db.Exec(schema)
-	return err
+	if _, err := r.db.Exec(schema); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`ALTER TABLE skill_versions ADD COLUMN deprecation_reason TEXT DEFAULT ''`,
+		`ALTER TABLE skill_versions ADD COLUMN yanked INTEGER DEFAULT 0`,
+		`ALTER TABLE skill_versions ADD COLUMN yank_reason TEXT DEFAULT ''`,
+		`ALTER TABLE skill_versions ADD COLUMN status_actor TEXT DEFAULT ''`,
+		`ALTER TABLE skill_versions ADD COLUMN status_updated_at DATETIME`,
+	} {
+		if _, err := r.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
+	return nil
 }
 
 // CreateOrUpdateSkill creates or updates a skill
 func (r *Repository) CreateOrUpdateSkill(ctx context.Context, skill *Skill) error {
 	tagsJSON, _ := json.Marshal(skill.Tags)
 	ownersJSON, _ := json.Marshal(skill.Owners)
-	
+
 	now := time.Now()
 	if skill.CreatedAt.IsZero() {
 		skill.CreatedAt = now
@@ -188,6 +350,10 @@ func (r *Repository) ListSkills(ctx context.Context, filters map[string]interfac
 	if ns, ok := filters["namespace"].(string); ok && ns != "" {
 		conditions = append(conditions, "namespace = ?")
 		args = append(args, ns)
+	}
+	if tag, ok := filters["tag"].(string); ok && tag != "" {
+		conditions = append(conditions, `EXISTS (SELECT 1 FROM json_each(skills.tags) WHERE json_each.value = ?)`)
+		args = append(args, tag)
 	}
 	if deprecated, ok := filters["deprecated"].(bool); ok {
 		conditions = append(conditions, "deprecated = ?")
@@ -285,7 +451,9 @@ func (r *Repository) GetVersion(ctx context.Context, namespace, name, version st
 	query := `
 		SELECT id, skill_id, name, namespace, version, description, digest_sha256, package_type, size_bytes,
 			created_at, created_by, runtime_compatibility, agent_compatibility, entrypoint_path,
-			manifest, validation_status, signature_status, source, deprecated
+			manifest, validation_status, signature_status, source, deprecated,
+			COALESCE(deprecation_reason, ''), COALESCE(yanked, 0), COALESCE(yank_reason, ''),
+			COALESCE(status_actor, ''), status_updated_at
 		FROM skill_versions
 		WHERE namespace = ? AND name = ? AND version = ?
 	`
@@ -293,12 +461,15 @@ func (r *Repository) GetVersion(ctx context.Context, namespace, name, version st
 	var sv SkillVersion
 	var runtimeJSON, agentJSON, manifestJSON string
 	var deprecated int
+	var yanked int
+	var statusUpdatedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, query, namespace, name, version).Scan(
 		&sv.ID, &sv.SkillID, &sv.Name, &sv.Namespace, &sv.Version, &sv.Description,
 		&sv.DigestSHA256, &sv.PackageType, &sv.SizeBytes, &sv.CreatedAt, &sv.CreatedBy,
 		&runtimeJSON, &agentJSON, &sv.EntrypointPath, &manifestJSON,
 		&sv.ValidationStatus, &sv.SignatureStatus, &sv.Source, &deprecated,
+		&sv.DeprecationReason, &yanked, &sv.YankReason, &sv.StatusActor, &statusUpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -308,6 +479,10 @@ func (r *Repository) GetVersion(ctx context.Context, namespace, name, version st
 	}
 
 	sv.Deprecated = intToBool(deprecated)
+	sv.Yanked = intToBool(yanked)
+	if statusUpdatedAt.Valid {
+		sv.StatusUpdatedAt = &statusUpdatedAt.Time
+	}
 	json.Unmarshal([]byte(runtimeJSON), &sv.RuntimeCompatibility)
 	json.Unmarshal([]byte(agentJSON), &sv.AgentCompatibility)
 	json.Unmarshal([]byte(manifestJSON), &sv.Manifest)
@@ -320,7 +495,9 @@ func (r *Repository) ListVersions(ctx context.Context, skillID int64) ([]SkillVe
 	query := `
 		SELECT id, skill_id, name, namespace, version, description, digest_sha256, package_type, size_bytes,
 			created_at, created_by, runtime_compatibility, agent_compatibility, entrypoint_path,
-			manifest, validation_status, signature_status, source, deprecated
+			manifest, validation_status, signature_status, source, deprecated,
+			COALESCE(deprecation_reason, ''), COALESCE(yanked, 0), COALESCE(yank_reason, ''),
+			COALESCE(status_actor, ''), status_updated_at
 		FROM skill_versions
 		WHERE skill_id = ?
 		ORDER BY created_at DESC
@@ -337,18 +514,25 @@ func (r *Repository) ListVersions(ctx context.Context, skillID int64) ([]SkillVe
 		var sv SkillVersion
 		var runtimeJSON, agentJSON, manifestJSON string
 		var deprecated int
+		var yanked int
+		var statusUpdatedAt sql.NullTime
 
 		err := rows.Scan(
 			&sv.ID, &sv.SkillID, &sv.Name, &sv.Namespace, &sv.Version, &sv.Description,
 			&sv.DigestSHA256, &sv.PackageType, &sv.SizeBytes, &sv.CreatedAt, &sv.CreatedBy,
 			&runtimeJSON, &agentJSON, &sv.EntrypointPath, &manifestJSON,
 			&sv.ValidationStatus, &sv.SignatureStatus, &sv.Source, &deprecated,
+			&sv.DeprecationReason, &yanked, &sv.YankReason, &sv.StatusActor, &statusUpdatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
 
 		sv.Deprecated = intToBool(deprecated)
+		sv.Yanked = intToBool(yanked)
+		if statusUpdatedAt.Valid {
+			sv.StatusUpdatedAt = &statusUpdatedAt.Time
+		}
 		json.Unmarshal([]byte(runtimeJSON), &sv.RuntimeCompatibility)
 		json.Unmarshal([]byte(agentJSON), &sv.AgentCompatibility)
 		json.Unmarshal([]byte(manifestJSON), &sv.Manifest)
@@ -365,11 +549,124 @@ func (r *Repository) DeleteVersion(ctx context.Context, namespace, name, version
 	return err
 }
 
+func (r *Repository) DeprecateVersion(ctx context.Context, namespace, name, version, reason, actor string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE skill_versions
+		SET deprecated = 1, deprecation_reason = ?, status_actor = ?, status_updated_at = ?
+		WHERE namespace = ? AND name = ? AND version = ?
+	`, reason, actor, time.Now(), namespace, name, version)
+	return err
+}
+
+func (r *Repository) YankVersion(ctx context.Context, namespace, name, version, reason, actor string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE skill_versions
+		SET yanked = 1, yank_reason = ?, status_actor = ?, status_updated_at = ?
+		WHERE namespace = ? AND name = ? AND version = ?
+	`, reason, actor, time.Now(), namespace, name, version)
+	return err
+}
+
+func (r *Repository) UnyankVersion(ctx context.Context, namespace, name, version, actor string) error {
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE skill_versions
+		SET yanked = 0, yank_reason = '', status_actor = ?, status_updated_at = ?
+		WHERE namespace = ? AND name = ? AND version = ?
+	`, actor, time.Now(), namespace, name, version)
+	return err
+}
+
 // HardDeleteVersion removes a version completely from the database
 func (r *Repository) HardDeleteVersion(ctx context.Context, namespace, name, version string) error {
 	query := `DELETE FROM skill_versions WHERE namespace = ? AND name = ? AND version = ?`
 	_, err := r.db.ExecContext(ctx, query, namespace, name, version)
 	return err
+}
+
+// SetDistTag assigns a channel tag to an existing version.
+func (r *Repository) SetDistTag(ctx context.Context, namespace, name, tag, version, actor string) error {
+	skill, err := r.GetSkill(ctx, namespace, name)
+	if err != nil {
+		return err
+	}
+	if skill == nil {
+		return fmt.Errorf("skill not found")
+	}
+	sv, err := r.GetVersion(ctx, namespace, name, version)
+	if err != nil {
+		return err
+	}
+	if sv == nil {
+		return fmt.Errorf("version not found")
+	}
+
+	_, err = r.db.ExecContext(ctx, `
+		INSERT INTO dist_tags (skill_id, tag, version, updated_at, updated_by)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(skill_id, tag) DO UPDATE SET
+			version = excluded.version,
+			updated_at = excluded.updated_at,
+			updated_by = excluded.updated_by
+	`, skill.ID, tag, version, time.Now(), actor)
+	if err != nil {
+		return err
+	}
+	if tag == "latest" {
+		_, err = r.db.ExecContext(ctx, `UPDATE skills SET latest_version = ?, updated_at = ? WHERE id = ?`, version, time.Now(), skill.ID)
+	}
+	return err
+}
+
+// ListDistTags returns all channel tags for a skill.
+func (r *Repository) ListDistTags(ctx context.Context, namespace, name string) (map[string]string, error) {
+	skill, err := r.GetSkill(ctx, namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	if skill == nil {
+		return nil, fmt.Errorf("skill not found")
+	}
+
+	rows, err := r.db.QueryContext(ctx, `SELECT tag, version FROM dist_tags WHERE skill_id = ? ORDER BY tag`, skill.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tags := make(map[string]string)
+	for rows.Next() {
+		var tag, version string
+		if err := rows.Scan(&tag, &version); err != nil {
+			return nil, err
+		}
+		tags[tag] = version
+	}
+	return tags, rows.Err()
+}
+
+// IncrementDownload records a successful package pull.
+func (r *Repository) IncrementDownload(ctx context.Context, namespace, name, version string) error {
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO download_counts (namespace, name, version, count, updated_at)
+		VALUES (?, ?, ?, 1, ?)
+		ON CONFLICT(namespace, name, version) DO UPDATE SET
+			count = count + 1,
+			updated_at = excluded.updated_at
+	`, namespace, name, version, time.Now())
+	return err
+}
+
+// DownloadCount returns pulls for a version, or all versions when version is empty.
+func (r *Repository) DownloadCount(ctx context.Context, namespace, name, version string) (int64, error) {
+	query := `SELECT COALESCE(SUM(count), 0) FROM download_counts WHERE namespace = ? AND name = ?`
+	args := []interface{}{namespace, name}
+	if version != "" {
+		query += ` AND version = ?`
+		args = append(args, version)
+	}
+	var count int64
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	return count, err
 }
 
 // LogAudit creates an audit log entry
