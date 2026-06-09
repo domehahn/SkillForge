@@ -13,10 +13,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/skillforge/skill-registry/internal/api"
+	"github.com/skillforge/skill-registry/internal/audit"
 	"github.com/skillforge/skill-registry/internal/auth"
 	"github.com/skillforge/skill-registry/internal/config"
 	"github.com/skillforge/skill-registry/internal/metadata"
 	"github.com/skillforge/skill-registry/internal/observability"
+	"github.com/skillforge/skill-registry/internal/ratelimit"
 	"github.com/skillforge/skill-registry/internal/registry"
 	"github.com/skillforge/skill-registry/internal/storage"
 	"github.com/skillforge/skill-registry/internal/validation"
@@ -67,23 +69,34 @@ func main() {
 		log.Fatalf("Failed to initialize authenticator: %v", err)
 	}
 
+	// Initialize audit log
+	auditRepo, err := audit.NewRepository(repo.GetDB())
+	if err != nil {
+		log.Fatalf("Failed to initialize audit log: %v", err)
+	}
+
 	// Initialize API handler
-	handler := api.NewHandler(reg, authenticator, logger, cfg)
+	handler := api.NewHandler(reg, authenticator, auditRepo, logger, cfg)
 
 	// Setup router
 	r := chi.NewRouter()
 	r.Use(observability.RequestIDMiddleware)
 	r.Use(observability.LoggingMiddleware(logger))
+	if cfg.RateLimit.Enabled {
+		limiter := ratelimit.New(cfg.RateLimit.RequestsPerMinute, time.Minute)
+		r.Use(ratelimit.Middleware(limiter))
+	}
 
 	handler.RegisterRoutes(r)
 
 	// Create HTTP server
 	srv := &http.Server{
-		Addr:         cfg.Server.Addr,
-		Handler:      r,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              cfg.Server.Addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	// Start server in a goroutine

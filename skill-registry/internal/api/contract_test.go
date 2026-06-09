@@ -58,7 +58,7 @@ func newTestServer(t *testing.T) *testServer {
 		t.Fatalf("auth.NewAuthenticator: %v", err)
 	}
 
-	handler := api.NewHandler(reg, authenticator, logger, cfg)
+	handler := api.NewHandler(reg, authenticator, nil, logger, cfg)
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
 
@@ -92,8 +92,10 @@ func (ts *testServer) publish(t *testing.T, namespace, name, version string, pkg
 // buildTgzPackage creates a valid publish-grade tgz for the given skill.
 func buildTgzPackage(t *testing.T, namespace, name, version string) []byte {
 	t.Helper()
+	skillMD := "# " + name + "\n"
+	sum := sha256.Sum256([]byte(skillMD))
 	files := map[string]string{
-		"SKILL.md": "# " + name + "\n",
+		"SKILL.md": skillMD,
 		"VERSION":  version + "\n",
 		"skill.yaml": fmt.Sprintf(
 			"name: %s\nnamespace: %s\nversion: %s\ndescription: test\nowners:\n  - test\n"+
@@ -106,7 +108,7 @@ func buildTgzPackage(t *testing.T, namespace, name, version string) []byte {
 			`{"spec_version":1,"name":%q,"namespace":%q,"version":%q,"entrypoint":"SKILL.md",`+
 				`"compatible_with":["codex"],"package_type":"tgz","packaged_by":"skforge","packaged_at":"1970-01-01T00:00:00Z"}`,
 			name, namespace, version),
-		"checksums.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  SKILL.md\n",
+		"checksums.txt": hex.EncodeToString(sum[:]) + "  SKILL.md\n",
 	}
 	var buf bytes.Buffer
 	gzw := gzip.NewWriter(&buf)
@@ -127,8 +129,10 @@ func buildTgzPackage(t *testing.T, namespace, name, version string) []byte {
 
 func buildZipPackage(t *testing.T, namespace, name, version string) []byte {
 	t.Helper()
+	skillMD := "# " + name + "\n"
+	sum := sha256.Sum256([]byte(skillMD))
 	files := map[string]string{
-		"SKILL.md": "# " + name + "\n",
+		"SKILL.md": skillMD,
 		"VERSION":  version + "\n",
 		"skill.yaml": fmt.Sprintf(
 			"name: %s\nnamespace: %s\nversion: %s\ndescription: test\nowners:\n  - test\n"+
@@ -141,7 +145,7 @@ func buildZipPackage(t *testing.T, namespace, name, version string) []byte {
 			`{"spec_version":1,"name":%q,"namespace":%q,"version":%q,"entrypoint":"SKILL.md",`+
 				`"compatible_with":["codex"],"package_type":"zip","packaged_by":"skforge","packaged_at":"1970-01-01T00:00:00Z"}`,
 			name, namespace, version),
-		"checksums.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  SKILL.md\n",
+		"checksums.txt": hex.EncodeToString(sum[:]) + "  SKILL.md\n",
 	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -275,12 +279,14 @@ func TestResolveReturnsContractDTO(t *testing.T) {
 // 4. Publish rejects a package missing manifest.json.
 func TestPublishRejectsMissingManifest(t *testing.T) {
 	srv := newTestServer(t)
+	skillMD := "# hi\n"
+	skillMDSum := sha256.Sum256([]byte(skillMD))
 	files := map[string]string{
-		"SKILL.md":     "# hi\n",
+		"SKILL.md":     skillMD,
 		"VERSION":      "1.0.0\n",
 		"skill.yaml":   "name: my-skill\nnamespace: test\nversion: 1.0.0\ndescription: t\nowners:\n  - t\nlicense: MIT\ncompatible_with:\n  - codex\nentrypoint: SKILL.md\nsecurity:\n  requires_network: false\n  requires_secrets: false\n  writes_files: false\n  runs_commands: false\n",
 		"CHANGELOG.md": "# Changelog\n\n## 1.0.0\n\n### Added\n- init\n",
-		"checksums.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  SKILL.md\n",
+		"checksums.txt": hex.EncodeToString(skillMDSum[:]) + "  SKILL.md\n",
 		// manifest.json intentionally omitted
 	}
 	pkg := buildTgzFromMap(t, files)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/domehahn/sklib/registryapi"
 	"github.com/domehahn/sklib/spec"
+	"github.com/skillforge/skill-registry/internal/audit"
 	"github.com/skillforge/skill-registry/internal/auth"
 	"github.com/skillforge/skill-registry/internal/config"
 	"github.com/skillforge/skill-registry/internal/metadata"
@@ -27,18 +29,43 @@ import (
 type Handler struct {
 	registry *registry.Registry
 	auth     *auth.Authenticator
+	audit    *audit.Repository // may be nil; no audit logging when nil
 	logger   *slog.Logger
 	config   *config.Config
 }
 
-// NewHandler creates a new API handler
-func NewHandler(reg *registry.Registry, authenticator *auth.Authenticator, logger *slog.Logger, cfg *config.Config) *Handler {
+// NewHandler creates a new API handler. auditRepo may be nil to disable audit logging.
+func NewHandler(reg *registry.Registry, authenticator *auth.Authenticator, auditRepo *audit.Repository, logger *slog.Logger, cfg *config.Config) *Handler {
 	return &Handler{
 		registry: reg,
 		auth:     authenticator,
+		audit:    auditRepo,
 		logger:   logger,
 		config:   cfg,
 	}
+}
+
+func (h *Handler) logAudit(r *http.Request, actor, action, target string) {
+	if h.audit == nil {
+		return
+	}
+	_ = h.audit.Log(r.Context(), audit.Entry{
+		Actor:     actor,
+		Action:    action,
+		Target:    target,
+		IPAddress: clientIP(r),
+	})
+}
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // RegisterRoutes registers all API routes
@@ -49,6 +76,14 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
+		maxBytes := int64(h.config.Storage.MaxPackageSizeMB)*1024*1024 + 65536 // +64 KB for headers/manifest
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+				next.ServeHTTP(w, r)
+			})
+		})
+
 		r.Get("/metadata", h.GetMetadata)
 		r.Get("/capabilities", h.GetCapabilities)
 
@@ -74,15 +109,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Get("/skills/{namespace}/{name}/versions/{version}/download", h.Download)
 		})
 
-		// Token management endpoints (require auth)
-		r.Group(func(r chi.Router) {
-			r.Use(h.auth.Middleware("write"))
-			r.Post("/tokens", h.CreateToken)
-			r.Get("/tokens", h.ListTokens)
-			r.Delete("/tokens/{id}", h.RevokeToken)
-		})
+		// Token management — scoped individually so each operation requires its own scope.
+		r.With(h.auth.Middleware("token:create")).Post("/tokens", h.CreateToken)
+		r.With(h.auth.Middleware("read")).Get("/tokens", h.ListTokens)
+		r.With(h.auth.Middleware("token:revoke")).Delete("/tokens/{id}", h.RevokeToken)
 
-		// Write endpoints (require auth with write scope)
+		// Write endpoints (require write scope)
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware("write"))
 			r.Put("/skills/{namespace}/{name}/versions/{version}", h.Publish)
@@ -95,13 +127,18 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Post("/artifacts/{kind}/{namespace}/{name}/promotions", h.PromoteArtifact)
 			r.Put("/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations", h.AttestArtifact)
 			r.Post("/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations", h.CreateArtifactAttestation)
-			r.Get("/namespaces/{namespace}/members", h.ListNamespaceMembers)
-			r.Put("/namespaces/{namespace}/members", h.UpsertNamespaceMember)
 			r.Get("/namespaces/{namespace}/webhooks", h.ListWebhooks)
 			r.Post("/namespaces/{namespace}/webhooks", h.CreateWebhook)
 		})
 
-		// Delete endpoints (require auth with delete scope)
+		// Namespace admin endpoints (require namespace:admin scope)
+		r.Group(func(r chi.Router) {
+			r.Use(h.auth.Middleware("namespace:admin"))
+			r.Get("/namespaces/{namespace}/members", h.ListNamespaceMembers)
+			r.Put("/namespaces/{namespace}/members", h.UpsertNamespaceMember)
+		})
+
+		// Delete endpoints (require delete scope)
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware("delete"))
 			r.Delete("/skills/{namespace}/{name}/versions/{version}", h.DeleteVersion)
@@ -218,6 +255,7 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logAudit(r, actor, "skill.publish", namespace+"/"+name+"@"+version)
 	WriteJSON(w, http.StatusCreated, registryapi.PublishResponse{
 		Namespace:   namespace,
 		Name:        name,
@@ -342,6 +380,7 @@ func (h *Handler) governVersion(w http.ResponseWriter, r *http.Request, action s
 		WriteError(w, http.StatusBadRequest, "GOVERNANCE_FAILED", err.Error())
 		return
 	}
+	h.logAudit(r, actor, "skill."+action, namespace+"/"+name+"@"+version)
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": action})
 }
 
@@ -497,6 +536,7 @@ func (h *Handler) DeleteVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logAudit(r, actor, "skill.delete", namespace+"/"+name+"@"+version)
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
@@ -567,7 +607,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	// Determine scopes based on role
 	scopes := []string{"read", "write"}
 	if user.Role == "admin" {
-		scopes = append(scopes, "delete")
+		scopes = []string{"read", "write", "delete", "admin", "token:create", "token:revoke", "namespace:admin"}
 	}
 
 	// Create session token (valid for 30 days)
@@ -611,10 +651,10 @@ func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate scopes
+	// Validate scopes — non-admin users may only create tokens narrower than their own role.
 	allowedScopes := []string{"read", "write"}
 	if user.Role == "admin" {
-		allowedScopes = append(allowedScopes, "delete")
+		allowedScopes = []string{"read", "write", "delete", "admin", "token:create", "token:revoke", "namespace:admin"}
 	}
 
 	for _, scope := range req.Scopes {
@@ -640,6 +680,7 @@ func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logAudit(r, user.Username, "token.create", req.Name)
 	WriteJSON(w, http.StatusCreated, token)
 }
 
@@ -695,6 +736,7 @@ func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.logAudit(r, user.Username, "token.revoke", tokenIDStr)
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 

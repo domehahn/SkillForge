@@ -1,0 +1,80 @@
+name: skill-registry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skill-registry/**'
+      - 'sklib/**'
+      - '.github/workflows/skill-registry.yml'
+  pull_request:
+    paths:
+      - 'skill-registry/**'
+      - 'sklib/**'
+      - '.github/workflows/skill-registry.yml'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skill-registry
+    env:
+      GOWORK: off
+      CGO_ENABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: skill-registry/go.mod
+          cache-dependency-path: skill-registry/go.sum
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y gcc libsqlite3-dev
+
+      - name: Verify go.mod is tidy
+        run: go mod tidy -diff
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (race)
+        run: go test -race -count=1 ./...
+
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+  build-image:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --file SkillForge/skill-registry/Dockerfile \
+            --tag skill-registry:ci \
+            .
+
+      - name: Smoke test
+        run: |
+          docker run --rm -d \
+            --name skill-registry-ci \
+            -p 18080:8080 \
+            -e SKILL_REGISTRY_AUTH_ENABLED=false \
+            skill-registry:ci
+          sleep 3
+          curl --fail http://localhost:18080/healthz
+          docker stop skill-registry-ci

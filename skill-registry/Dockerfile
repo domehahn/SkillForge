@@ -34,7 +34,8 @@ RUN CGO_ENABLED=1 GOWORK=off go build -o /app/skforge ./cmd/skforge
 # Runtime image
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates sqlite-libs
+RUN apk add --no-cache ca-certificates sqlite-libs \
+    && adduser -D -u 1001 -H -h /app registry
 
 WORKDIR /app
 
@@ -42,7 +43,9 @@ COPY --from=builder /app/skill-registry /app/
 COPY --from=builder /app/skforge /app/
 COPY --from=web-builder /web/dist /app/web/dist
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown -R registry:registry /app
+
+USER registry
 
 EXPOSE 8080
 

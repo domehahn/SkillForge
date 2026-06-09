@@ -17,6 +17,13 @@ type Config struct {
 	Auth       AuthConfig       `yaml:"auth"`
 	Proxy      ProxyConfig      `yaml:"proxy"`
 	Validation ValidationConfig `yaml:"validation"`
+	RateLimit  RateLimitConfig  `yaml:"rate_limit"`
+}
+
+// RateLimitConfig holds rate limiting configuration
+type RateLimitConfig struct {
+	Enabled           bool `yaml:"enabled"`
+	RequestsPerMinute int  `yaml:"requests_per_minute"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -84,6 +91,10 @@ func DefaultConfig() *Config {
 		},
 		Validation: ValidationConfig{
 			BlockedExtensions: []string{".exe", ".dll", ".so", ".dylib", ".bin"},
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:           true,
+			RequestsPerMinute: 300,
 		},
 	}
 }

@@ -6,6 +6,9 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,8 +16,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"encoding/json"
 
 	"github.com/domehahn/sklib/packageio"
 	"github.com/domehahn/sklib/spec"
@@ -389,8 +390,10 @@ func (v *Validator) validateFiles(files []packageFile, result *ValidationResult)
 				}
 			}
 		}
-		if _, hasChecksums := findByBase(byPath, "checksums.txt"); !hasChecksums {
+		if checksumsFile, hasChecksums := findByBase(byPath, "checksums.txt"); !hasChecksums {
 			result.addError("MISSING_CHECKSUMS", "", "checksums.txt is required for publish")
+		} else {
+			verifyChecksums(checksumsFile.Content, byPath, result)
 		}
 	}
 
@@ -421,6 +424,42 @@ func (v *Validator) validateFiles(files []packageFile, result *ValidationResult)
 	}
 	if hasChangelog && hasVersion && !changelogContainsVersion(changelogFile.Content, versionText) {
 		result.addError("CHANGELOG_ENTRY_MISSING", changelogFile.Name, fmt.Sprintf("CHANGELOG.md must contain an entry for %s", versionText))
+	}
+}
+
+// verifyChecksums parses checksums.txt and validates each listed file's SHA256 against its content.
+// Format: "<hex-sha256>  <filename>" or "sha256:<hex>  <filename>" (one entry per line).
+func verifyChecksums(checksumsContent []byte, byPath map[string]packageFile, result *ValidationResult) {
+	scanner := bufio.NewScanner(bytes.NewReader(checksumsContent))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			result.addError("CHECKSUMS_MALFORMED", "checksums.txt", fmt.Sprintf("malformed line: %q", line))
+			continue
+		}
+		expectedHex := strings.TrimPrefix(parts[0], "sha256:")
+		filename := parts[1]
+		// Normalise path — strip leading "./" or root prefix to match byPath keys.
+		filename = normalizeArchivePath(filename)
+
+		file, ok := byPath[filename]
+		if !ok {
+			// Try base-name match as fallback for single-level archives.
+			file, ok = findByBase(byPath, filepath.Base(filename))
+		}
+		if !ok {
+			result.addError("CHECKSUMS_MISSING_FILE", "checksums.txt", fmt.Sprintf("checksums.txt references %q but file not found in package", filename))
+			continue
+		}
+		sum := sha256.Sum256(file.Content)
+		actualHex := hex.EncodeToString(sum[:])
+		if !strings.EqualFold(actualHex, expectedHex) {
+			result.addError("CHECKSUM_MISMATCH", filename, fmt.Sprintf("SHA256 mismatch for %s: expected %s, got %s", filename, expectedHex, actualHex))
+		}
 	}
 }
 

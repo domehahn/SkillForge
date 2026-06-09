@@ -44,7 +44,7 @@ func (a *Authenticator) Middleware(requiredScopes ...string) func(http.Handler) 
 			// If auth is disabled, allow all requests
 			if !a.enabled {
 				ctx := context.WithValue(r.Context(), actorKey, "anonymous")
-				ctx = context.WithValue(ctx, scopesKey, []string{"read", "write", "delete"})
+				ctx = context.WithValue(ctx, scopesKey, []string{"read", "write", "delete", "admin", "token:create", "token:revoke", "namespace:admin"})
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -120,12 +120,13 @@ func hasScopes(userScopes, requiredScopes []string) bool {
 	for _, s := range userScopes {
 		scopeMap[s] = true
 	}
-
+	if scopeMap["admin"] {
+		return true
+	}
 	for _, required := range requiredScopes {
 		if !scopeMap[required] {
 			return false
 		}
 	}
-
 	return true
 }
