@@ -1,6 +1,6 @@
 module github.com/skillforge/skill-registry
 
-go 1.22
+go 1.25
 
 require (
 	github.com/domehahn/sklib v0.0.0

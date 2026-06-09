@@ -7,10 +7,9 @@ GOTEST=$(GOCMD) test
 GOVET=$(GOCMD) vet
 GOFMT=gofmt
 
-# Binary names
+# Binary names — skpm is a consumer tool, not part of the SkillForge registry server.
 REGISTRY_BINARY=skill-registry
 CLI_BINARY=skforge
-SKPM_BINARY=skpm
 
 # Build directory
 BIN_DIR=./bin
@@ -23,7 +22,6 @@ build:
 	@mkdir -p $(BIN_DIR)
 	$(GOBUILD) -o $(BIN_DIR)/$(REGISTRY_BINARY) ./cmd/skill-registry
 	$(GOBUILD) -o $(BIN_DIR)/$(CLI_BINARY) ./cmd/skforge
-	$(GOBUILD) -o $(BIN_DIR)/$(SKPM_BINARY) ./cmd/skpm
 	@echo "Build complete!"
 
 test:
@@ -44,7 +42,7 @@ run: build
 
 docker-build:
 	@echo "Building Docker image..."
-	docker build -t skill-registry:latest .
+	docker build -t skill-registry:latest -f SkillForge/skill-registry/Dockerfile ../..
 	@echo "Docker build complete!"
 
 compose-up:
