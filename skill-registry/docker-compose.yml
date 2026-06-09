@@ -1,6 +1,8 @@
 services:
   registry:
-    build: .
+    build:
+      context: ../..
+      dockerfile: SkillForge/skill-registry/Dockerfile
     image: skill-registry:latest
     container_name: skill-registry
     ports:

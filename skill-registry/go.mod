@@ -10,3 +10,6 @@ require (
 )
 
 require golang.org/x/crypto v0.52.0 // indirect
+
+// In workspace mode go.work takes precedence; this fallback enables Docker builds with GOWORK=off.
+replace github.com/domehahn/sklib v0.0.0 => ../sklib
