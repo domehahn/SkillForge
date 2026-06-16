@@ -1,5 +1,5 @@
 # Build Web UI
-FROM node:20-alpine AS web-builder
+FROM node:22-alpine AS web-builder
 
 WORKDIR /web
 COPY SkillForge/skill-registry/web/package*.json ./
@@ -32,7 +32,7 @@ RUN CGO_ENABLED=1 GOWORK=off go build -o /app/skill-registry ./cmd/skill-registr
 RUN CGO_ENABLED=1 GOWORK=off go build -o /app/skforge ./cmd/skforge
 
 # Runtime image
-FROM alpine:3.19
+FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates sqlite-libs \
     && adduser -D -u 1001 -H -h /app registry
@@ -43,15 +43,19 @@ COPY --from=builder /app/skill-registry /app/
 COPY --from=builder /app/skforge /app/
 COPY --from=web-builder /web/dist /app/web/dist
 
-RUN mkdir -p /app/data && chown -R registry:registry /app
+RUN mkdir -p /app/data /app/certs && chown -R registry:registry /app
 
 USER registry
 
-EXPOSE 8080
+EXPOSE 8080 8443
 
 ENV SKILL_REGISTRY_ADDR=":8080"
 ENV SKILL_REGISTRY_DATA_DIR="/app/data"
 ENV SKILL_REGISTRY_DB_PATH="/app/data/registry.db"
+# TLS: mount cert/key into /app/certs and set these env vars to enable HTTPS
+ENV SKILL_REGISTRY_TLS_ENABLED="false"
+ENV SKILL_REGISTRY_TLS_CERT_FILE="/app/certs/tls.crt"
+ENV SKILL_REGISTRY_TLS_KEY_FILE="/app/certs/tls.key"
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/healthz || exit 1

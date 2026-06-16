@@ -9,13 +9,43 @@ storage:
     - zip
 
 database:
+  driver: "postgres"
+  dsn: "postgres://skillforge:skillforge@localhost:5432/skillforge?sslmode=disable"
   path: "./data/registry.db"
 
 auth:
   enabled: true  # Set to true for production, false for development
+  bcrypt_cost: 12
+  require_email_verification: true
   # Note: User authentication is database-backed.
   # Create initial admin user with:
-  #   ./bin/skill-registry admin create-user --username admin --password <pass> --role admin
+  #   ./bin/skill-registry admin create-user --username admin --password <pass> --role admin --email admin@example.com --email-verified
+
+security:
+  headers_enabled: true
+  hsts_enabled: true
+  hsts_max_age_seconds: 31536000
+  openapi_cors_origin: "https://registry.skillforge.local"
+  content_security_policy: "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self'"
+
+email:
+  smtp_enabled: true
+  smtp_host: "smtp.example.com"
+  smtp_port: 587
+  smtp_username: ""
+  smtp_password: ""
+  from: "SkillForge <noreply@skillforge.local>"
+  base_url: "https://registry.skillforge.local"
+
+backup:
+  enabled: true
+  output_dir: "./backups"
+  interval_minutes: 360
+  retention_copies: 14
+
+production:
+  mode: true
+  enforce: false
 
 proxy:
   enabled: false

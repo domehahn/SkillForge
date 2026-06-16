@@ -14,13 +14,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/domehahn/sklib/registryapi"
 	"github.com/domehahn/sklib/spec"
+	"github.com/go-chi/chi/v5"
 	"github.com/skillforge/skill-registry/internal/audit"
 	"github.com/skillforge/skill-registry/internal/auth"
 	"github.com/skillforge/skill-registry/internal/config"
+	"github.com/skillforge/skill-registry/internal/email"
 	"github.com/skillforge/skill-registry/internal/metadata"
+	"github.com/skillforge/skill-registry/internal/observability"
 	"github.com/skillforge/skill-registry/internal/registry"
 	"github.com/skillforge/skill-registry/internal/validation"
 )
@@ -32,6 +34,7 @@ type Handler struct {
 	audit    *audit.Repository // may be nil; no audit logging when nil
 	logger   *slog.Logger
 	config   *config.Config
+	email    *email.Sender
 }
 
 // NewHandler creates a new API handler. auditRepo may be nil to disable audit logging.
@@ -42,6 +45,7 @@ func NewHandler(reg *registry.Registry, authenticator *auth.Authenticator, audit
 		audit:    auditRepo,
 		logger:   logger,
 		config:   cfg,
+		email:    email.NewSender(cfg.Email),
 	}
 }
 
@@ -86,9 +90,15 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 		r.Get("/metadata", h.GetMetadata)
 		r.Get("/capabilities", h.GetCapabilities)
+		r.Get("/stats", h.GetStats)
+		r.Get("/artifacts/facets", h.GetFacets)
+		r.Get("/namespaces/{namespace}", h.GetNamespace)
+		r.Get("/namespaces/{namespace}/feed", h.AtomFeed)
 
 		// Auth endpoints (no authentication required)
 		r.Post("/auth/login", h.Login)
+		r.Get("/auth/verify-email", h.VerifyEmail)
+		r.Post("/auth/verify-email", h.VerifyEmail)
 
 		// Public read endpoints (no auth required)
 		r.Group(func(r chi.Router) {
@@ -114,6 +124,55 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.With(h.auth.Middleware("read")).Get("/tokens", h.ListTokens)
 		r.With(h.auth.Middleware("token:revoke")).Delete("/tokens/{id}", h.RevokeToken)
 
+		// Account self-service
+		r.With(h.auth.Middleware("write")).Patch("/account/password", h.ChangePassword)
+		r.With(h.auth.Middleware("write")).Patch("/account/profile", h.UpdateProfile)
+
+		// Notifications
+		r.With(h.auth.Middleware("read")).Get("/notifications", h.GetNotifications)
+		r.With(h.auth.Middleware("read")).Put("/notifications/read", h.MarkNotificationsRead)
+		r.With(h.auth.Middleware("read")).Delete("/notifications/{id}", h.DeleteNotification)
+
+		// Public artifact stats and dependents
+		r.Get("/artifacts/{kind}/{namespace}/{name}/stats", h.GetArtifactStats)
+		r.Get("/artifacts/mcp/{namespace}/{name}/mcp.json", h.GetMCPManifest)
+		r.Get("/artifacts/{namespace}/{name}/dependents", h.GetArtifactDependents)
+		r.Get("/namespaces/{namespace}/pinned", h.GetPinned)
+		r.Get("/publishers/top", h.ListTopPublishers)
+
+		// Stars (public read, auth write)
+		r.With(h.auth.Middleware()).Get("/artifacts/{kind}/{namespace}/{name}/stars", h.GetArtifactStarInfo)
+		r.With(h.auth.Middleware("write")).Post("/artifacts/{kind}/{namespace}/{name}/star", h.StarArtifact)
+		r.With(h.auth.Middleware("write")).Delete("/artifacts/{kind}/{namespace}/{name}/star", h.UnstarArtifact)
+
+		// Scan results (public read)
+		r.Get("/artifacts/{kind}/{namespace}/{name}/versions/{version}/scan", h.ListScanResults)
+
+		// Comments
+		r.Get("/artifacts/{kind}/{namespace}/{name}/comments", h.ListComments)
+		r.With(h.auth.Middleware("write")).Post("/artifacts/{kind}/{namespace}/{name}/comments", h.AddComment)
+		r.With(h.auth.Middleware("write")).Patch("/comments/{id}", h.UpdateComment)
+		r.With(h.auth.Middleware("write")).Delete("/comments/{id}", h.DeleteComment)
+
+		// Collections
+		r.Get("/namespaces/{owner}/collections", h.ListCollections)
+		r.Get("/namespaces/{owner}/collections/{slug}", h.GetCollection)
+		r.With(h.auth.Middleware("write")).Post("/collections", h.CreateCollection)
+		r.With(h.auth.Middleware("write")).Put("/namespaces/{owner}/collections/{slug}", h.UpdateCollection)
+		r.With(h.auth.Middleware("write")).Delete("/namespaces/{owner}/collections/{slug}", h.DeleteCollection)
+
+		// Namespace insights
+		r.With(h.auth.Middleware()).Get("/namespaces/{namespace}/insights", h.GetNamespaceInsights)
+
+		// Artifact transfer
+		r.With(h.auth.Middleware("write")).Post("/artifacts/{kind}/{namespace}/{name}/transfer", h.TransferArtifact)
+
+		// Follows
+		r.Get("/namespaces/{namespace}/follow", h.GetFollowInfo)
+		r.With(h.auth.Middleware()).Post("/namespaces/{namespace}/follow", h.FollowNamespace)
+		r.With(h.auth.Middleware()).Delete("/namespaces/{namespace}/follow", h.UnfollowNamespace)
+		r.With(h.auth.Middleware()).Get("/account/following", h.GetFollowing)
+
 		// Write endpoints (require write scope)
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware("write"))
@@ -124,11 +183,18 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Post("/skills/{namespace}/{name}/versions/{version}/yank", h.YankVersion)
 			r.Post("/skills/{namespace}/{name}/versions/{version}/unyank", h.UnyankVersion)
 			r.Put("/artifacts/{kind}/{namespace}/{name}/versions/{version}", h.PublishArtifact)
+			r.Patch("/artifacts/{kind}/{namespace}/{name}", h.PatchArtifact)
+			r.Patch("/artifacts/{kind}/{namespace}/{name}/versions/{version}", h.PatchArtifactVersion)
+			r.Patch("/namespaces/{namespace}", h.PatchNamespace)
 			r.Post("/artifacts/{kind}/{namespace}/{name}/promotions", h.PromoteArtifact)
 			r.Put("/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations", h.AttestArtifact)
 			r.Post("/artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations", h.CreateArtifactAttestation)
 			r.Get("/namespaces/{namespace}/webhooks", h.ListWebhooks)
 			r.Post("/namespaces/{namespace}/webhooks", h.CreateWebhook)
+			r.Delete("/namespaces/{namespace}/webhooks/{id}", h.DeleteWebhook)
+			r.Post("/namespaces/{namespace}/webhooks/{id}/test", h.TestWebhook)
+			r.Get("/namespaces/{namespace}/webhooks/{id}/deliveries", h.ListWebhookDeliveries)
+			r.Put("/namespaces/{namespace}/pinned", h.SetPinned)
 		})
 
 		// Namespace admin endpoints (require namespace:admin scope)
@@ -136,6 +202,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Use(h.auth.Middleware("namespace:admin"))
 			r.Get("/namespaces/{namespace}/members", h.ListNamespaceMembers)
 			r.Put("/namespaces/{namespace}/members", h.UpsertNamespaceMember)
+			r.Delete("/namespaces/{namespace}/members/{username}", h.RemoveNamespaceMember)
 		})
 
 		// Delete endpoints (require delete scope)
@@ -143,7 +210,29 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Use(h.auth.Middleware("delete"))
 			r.Delete("/skills/{namespace}/{name}/versions/{version}", h.DeleteVersion)
 		})
+
+		// Admin-only endpoints
+		r.Group(func(r chi.Router) {
+			r.Use(h.auth.Middleware("admin"))
+			r.Get("/audit", h.GetAuditLog)
+			r.Get("/admin/users", h.AdminListUsers)
+			r.Post("/admin/users", h.AdminCreateUser)
+			r.Post("/admin/users/{username}/send-verification", h.AdminSendVerification)
+			r.Put("/admin/users/{username}/role", h.AdminUpdateUserRole)
+			r.Delete("/admin/users/{username}", h.AdminDeleteUser)
+			r.Get("/admin/namespaces", h.AdminListNamespaces)
+			r.Put("/admin/namespaces/{namespace}/verify", h.AdminVerifyNamespace)
+		})
+
+		// Metrics — public so infra scrapers work without a token
+		r.Get("/metrics", h.GetMetrics)
+
+		// OpenAPI spec
+		r.Get("/openapi.yaml", h.GetOpenAPISpec)
 	})
+
+	// API docs (Redoc)
+	r.Get("/api-docs", h.GetAPIDocs)
 
 	// Serve static files from web UI (if exists)
 	h.ServeStaticFiles(r)
@@ -156,7 +245,11 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 
 // ReadyCheck handles readiness check requests
 func (h *Handler) ReadyCheck(w http.ResponseWriter, r *http.Request) {
-	// Could check database connectivity here
+	if err := h.registry.Ping(r.Context()); err != nil {
+		h.logger.Error("readyz: db ping failed", "error", err)
+		WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not ready", "error": "database unavailable"})
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
@@ -225,6 +318,11 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		packageType = "zip"
 	default:
 		WriteError(w, http.StatusBadRequest, "INVALID_CONTENT_TYPE", "Content-Type must be application/gzip or application/zip")
+		return
+	}
+
+	// Enforce namespace membership — open when no members are configured.
+	if !h.requireNamespaceRole(w, r, namespace, "maintainer") {
 		return
 	}
 
@@ -603,6 +701,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusUnauthorized, "AUTH_FAILED", "Invalid username or password")
 		return
 	}
+	if h.config.Auth.RequireEmailVerification && user.Role != "admin" && !user.EmailVerified {
+		h.logger.Warn("authentication blocked for unverified email", "username", req.Username)
+		WriteError(w, http.StatusForbidden, "EMAIL_NOT_VERIFIED", "Email verification is required before login")
+		return
+	}
 
 	// Determine scopes based on role
 	scopes := []string{"read", "write"}
@@ -620,11 +723,44 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
-		"token":      token.Token,
-		"user":       user.Username,
-		"role":       user.Role,
-		"scopes":     scopes,
-		"expires_at": token.ExpiresAt,
+		"token":          token.Token,
+		"user":           user.Username,
+		"role":           user.Role,
+		"scopes":         scopes,
+		"email":          user.Email,
+		"email_verified": user.EmailVerified,
+		"expires_at":     token.ExpiresAt,
+	})
+}
+
+// VerifyEmail marks an account email as verified when given a valid token.
+func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" && r.Method == http.MethodPost {
+		var req struct {
+			Token string `json:"token"`
+		}
+		if err := ParseJSON(r, &req); err != nil {
+			WriteError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+			return
+		}
+		token = req.Token
+	}
+	if token == "" {
+		WriteError(w, http.StatusBadRequest, "MISSING_TOKEN", "Verification token is required")
+		return
+	}
+	user, err := h.auth.GetUserRepo().VerifyEmailToken(r.Context(), token)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "VERIFY_EMAIL_FAILED", err.Error())
+		return
+	}
+	h.logAudit(r, user.Username, "email_verify", user.Username)
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"status":         "verified",
+		"user":           user.Username,
+		"email":          user.Email,
+		"email_verified": user.EmailVerified,
 	})
 }
 
@@ -740,6 +876,52 @@ func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
+// GetMetrics returns registry-wide counters in Prometheus exposition format.
+func (h *Handler) GetMetrics(w http.ResponseWriter, r *http.Request) {
+	snap, err := h.registry.Metrics(r.Context())
+	if err != nil {
+		h.logger.Error("metrics query failed", "error", err)
+		WriteError(w, http.StatusInternalServerError, "METRICS_FAILED", "Failed to query metrics")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	observability.DefaultMetrics().WritePrometheus(w)
+	writeGauge := func(name, help string, value int64) {
+		_, _ = fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s gauge\n%s %d\n", name, help, name, name, value)
+	}
+	writeGauge("skillforge_total_skills", "Total registered legacy skill records.", snap.TotalSkills)
+	writeGauge("skillforge_total_versions", "Total registered legacy skill versions.", snap.TotalVersions)
+	writeGauge("skillforge_active_versions", "Legacy skill versions that are neither yanked nor deprecated.", snap.ActiveVersions)
+	writeGauge("skillforge_yanked_versions", "Legacy skill versions marked as yanked.", snap.YankedVersions)
+	writeGauge("skillforge_deprecated_versions", "Legacy skill versions marked as deprecated.", snap.DeprecatedVersions)
+	writeGauge("skillforge_total_downloads", "Total legacy skill downloads recorded.", snap.TotalDownloads)
+	writeGauge("skillforge_active_tokens", "API tokens that are not revoked.", snap.ActiveTokens)
+	writeGauge("skillforge_total_artifacts", "Total registered artifacts.", snap.TotalArtifacts)
+	writeGauge("skillforge_total_namespaces", "Total namespaces with artifacts.", snap.TotalNamespaces)
+}
+
+// GetAuditLog returns recent audit log entries. Requires admin scope.
+func (h *Handler) GetAuditLog(w http.ResponseWriter, r *http.Request) {
+	if h.audit == nil {
+		WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": []struct{}{}})
+		return
+	}
+	actor := r.URL.Query().Get("actor")
+	action := r.URL.Query().Get("action")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	entries, err := h.audit.List(r.Context(), actor, action, limit)
+	if err != nil {
+		h.logger.Error("audit log query failed", "error", err)
+		WriteError(w, http.StatusInternalServerError, "AUDIT_FAILED", "Failed to query audit log")
+		return
+	}
+	if entries == nil {
+		entries = []audit.Entry{}
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"entries": entries})
+}
+
 // ServeStaticFiles serves the web UI if available
 func (h *Handler) ServeStaticFiles(r chi.Router) {
 	// Check if web/dist directory exists
@@ -824,7 +1006,27 @@ func apiCompareVersion(a, b string) int {
 			return -1
 		}
 	}
-	return strings.Compare(a, b)
+	// Same numeric parts — pre-release has lower precedence than release (semver §9).
+	aPre, bPre := apiPreRelease(a), apiPreRelease(b)
+	switch {
+	case aPre == "" && bPre == "":
+		return 0
+	case aPre == "" && bPre != "":
+		return 1 // release > pre-release
+	case aPre != "" && bPre == "":
+		return -1 // pre-release < release
+	default:
+		return strings.Compare(aPre, bPre)
+	}
+}
+
+func apiPreRelease(v string) string {
+	base := strings.Split(v, "+")[0]
+	parts := strings.SplitN(base, "-", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return ""
 }
 
 func apiVersionParts(v string) [3]int {
@@ -872,4 +1074,164 @@ func toRegistryAPIVersions(versions []metadata.SkillVersion) []registryapi.Skill
 		out = append(out, rv)
 	}
 	return out
+}
+
+// ChangePassword handles authenticated password change requests.
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	user := auth.UserFromContext(r.Context())
+	if user == nil {
+		WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+		return
+	}
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+		return
+	}
+	if len(req.NewPassword) < 8 {
+		WriteError(w, http.StatusBadRequest, "WEAK_PASSWORD", "New password must be at least 8 characters")
+		return
+	}
+	if err := h.auth.GetUserRepo().ChangePassword(r.Context(), user.ID, req.CurrentPassword, req.NewPassword); err != nil {
+		WriteError(w, http.StatusBadRequest, "CHANGE_PASSWORD_FAILED", err.Error())
+		return
+	}
+	h.logAudit(r, user.Username, "password_change", user.Username)
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// AdminListUsers returns all users (admin only)
+func (h *Handler) AdminListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := h.auth.GetUserRepo().ListUsers(r.Context())
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]interface{}{"users": users})
+}
+
+// AdminCreateUser creates a new user (admin only)
+func (h *Handler) AdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username      string `json:"username"`
+		Email         string `json:"email"`
+		Password      string `json:"password"`
+		Role          string `json:"role"`
+		EmailVerified bool   `json:"email_verified"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+	if req.Role == "" {
+		req.Role = "user"
+	}
+	user, err := h.auth.GetUserRepo().CreateUserWithOptions(r.Context(), auth.UserCreateOptions{
+		Username:      req.Username,
+		Email:         req.Email,
+		Password:      req.Password,
+		Role:          req.Role,
+		EmailVerified: req.EmailVerified || req.Role == "admin",
+	})
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, "CREATE_FAILED", err.Error())
+		return
+	}
+	h.logAudit(r, auth.ActorFromContext(r.Context()), "user_create", req.Username)
+	resp := map[string]interface{}{"user": user}
+	if h.config.Auth.RequireEmailVerification && user.Email != "" && !user.EmailVerified {
+		token, err := h.auth.GetUserRepo().CreateEmailVerificationToken(r.Context(), user.ID, 24*time.Hour)
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, "VERIFICATION_TOKEN_FAILED", err.Error())
+			return
+		}
+		resp["verification_expires_at"] = token.ExpiresAt
+		if h.email.Enabled() {
+			if err := h.email.SendVerification(user.Email, user.Username, token.Token); err != nil {
+				WriteError(w, http.StatusInternalServerError, "VERIFICATION_EMAIL_FAILED", err.Error())
+				return
+			}
+			resp["verification_email_sent"] = true
+		} else {
+			resp["verification_token"] = token.Token
+			resp["verification_url"] = h.email.VerificationURL(token.Token)
+		}
+	}
+	WriteJSON(w, http.StatusCreated, resp)
+}
+
+// AdminSendVerification creates and sends a fresh verification email for a user.
+func (h *Handler) AdminSendVerification(w http.ResponseWriter, r *http.Request) {
+	username := chi.URLParam(r, "username")
+	user, err := h.auth.GetUserRepo().GetUser(r.Context(), username)
+	if err != nil {
+		WriteError(w, http.StatusNotFound, "USER_NOT_FOUND", err.Error())
+		return
+	}
+	if user.Email == "" {
+		WriteError(w, http.StatusBadRequest, "EMAIL_MISSING", "User has no email address")
+		return
+	}
+	if user.EmailVerified {
+		WriteJSON(w, http.StatusOK, map[string]interface{}{"status": "already_verified", "user": user.Username})
+		return
+	}
+	token, err := h.auth.GetUserRepo().CreateEmailVerificationToken(r.Context(), user.ID, 24*time.Hour)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "VERIFICATION_TOKEN_FAILED", err.Error())
+		return
+	}
+	resp := map[string]interface{}{
+		"user":                    user.Username,
+		"verification_expires_at": token.ExpiresAt,
+	}
+	if h.email.Enabled() {
+		if err := h.email.SendVerification(user.Email, user.Username, token.Token); err != nil {
+			WriteError(w, http.StatusInternalServerError, "VERIFICATION_EMAIL_FAILED", err.Error())
+			return
+		}
+		resp["verification_email_sent"] = true
+	} else {
+		resp["verification_token"] = token.Token
+		resp["verification_url"] = h.email.VerificationURL(token.Token)
+	}
+	h.logAudit(r, auth.ActorFromContext(r.Context()), "email_verification_send", username)
+	WriteJSON(w, http.StatusOK, resp)
+}
+
+// AdminUpdateUserRole updates a user's role (admin only)
+func (h *Handler) AdminUpdateUserRole(w http.ResponseWriter, r *http.Request) {
+	username := chi.URLParam(r, "username")
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+	if err := h.auth.GetUserRepo().UpdateUserRole(r.Context(), username, req.Role); err != nil {
+		WriteError(w, http.StatusBadRequest, "UPDATE_FAILED", err.Error())
+		return
+	}
+	h.logAudit(r, auth.ActorFromContext(r.Context()), "user_role_update", username)
+	WriteJSON(w, http.StatusOK, map[string]string{"username": username, "role": req.Role})
+}
+
+// AdminDeleteUser deletes a user (admin only)
+func (h *Handler) AdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	username := chi.URLParam(r, "username")
+	actor := auth.ActorFromContext(r.Context())
+	if actor == username {
+		WriteError(w, http.StatusBadRequest, "SELF_DELETE", "cannot delete your own account")
+		return
+	}
+	if err := h.auth.GetUserRepo().DeleteUser(r.Context(), username); err != nil {
+		WriteError(w, http.StatusBadRequest, "DELETE_FAILED", err.Error())
+		return
+	}
+	h.logAudit(r, actor, "user_delete", username)
+	w.WriteHeader(http.StatusNoContent)
 }

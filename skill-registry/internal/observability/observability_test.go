@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/skillforge/skill-registry/internal/config"
 )
 
 func TestNewLogger(t *testing.T) {
@@ -153,6 +155,60 @@ func TestLoggingMiddleware_WithoutRequestID(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+}
+
+func TestSecurityHeadersMiddleware(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	middleware := SecurityHeadersMiddleware(config.SecurityConfig{
+		ContentSecurityPolicy: "default-src 'self'",
+		HSTSEnabled:           true,
+		HSTSMaxAgeSeconds:     31536000,
+	})(handler)
+
+	req := httptest.NewRequest("GET", "https://example.test/", nil)
+	rec := httptest.NewRecorder()
+	middleware.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Content-Security-Policy"); got != "default-src 'self'" {
+		t.Errorf("expected CSP header, got %q", got)
+	}
+	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("expected X-Frame-Options DENY, got %q", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("expected nosniff, got %q", got)
+	}
+	if got := rec.Header().Get("Strict-Transport-Security"); !strings.Contains(got, "max-age=31536000") {
+		t.Errorf("expected HSTS header, got %q", got)
+	}
+}
+
+func TestMetricsMiddleware(t *testing.T) {
+	registry := NewMetricsRegistry()
+	handler := registry.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	req := httptest.NewRequest("GET", "/api/v1/artifacts/1234567890abcdef", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	metrics := httptest.NewRecorder()
+	registry.WritePrometheus(metrics)
+	body := metrics.Body.String()
+	if !strings.Contains(body, `skillforge_http_requests_total{method="GET"`) {
+		t.Fatalf("expected request counter, got %s", body)
+	}
+	if !strings.Contains(body, `status_class="5xx"`) {
+		t.Fatalf("expected 5xx status class, got %s", body)
+	}
+	if !strings.Contains(body, "skillforge_http_errors_total") {
+		t.Fatalf("expected error counter, got %s", body)
+	}
+	if !strings.Contains(body, "/api/v1/artifacts/{id}") {
+		t.Fatalf("expected normalized route, got %s", body)
 	}
 }
 

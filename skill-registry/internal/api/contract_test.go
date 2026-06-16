@@ -9,9 +9,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/domehahn/sklib/registryapi"
@@ -176,8 +178,8 @@ func jsonBody(t *testing.T, resp *http.Response) map[string]interface{} {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-// 1. GET /api/v1/capabilities returns all registryapi.CapabilitiesResponse fields
-//    plus SkillForge-specific extensions.
+//  1. GET /api/v1/capabilities returns all registryapi.CapabilitiesResponse fields
+//     plus SkillForge-specific extensions.
 func TestCapabilitiesMatchesContract(t *testing.T) {
 	srv := newTestServer(t)
 
@@ -204,6 +206,27 @@ func TestCapabilitiesMatchesContract(t *testing.T) {
 	}
 	if v, ok := body["api_version"].(string); !ok || v == "" {
 		t.Errorf("api_version must be a non-empty string, got %v", body["api_version"])
+	}
+}
+
+func TestMetricsPrometheusFormat(t *testing.T) {
+	srv := newTestServer(t)
+
+	resp, err := http.Get(srv.url("/api/v1/metrics"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/plain") {
+		t.Fatalf("expected text/plain metrics content type, got %q", ct)
+	}
+	if !strings.Contains(string(body), "skillforge_total_artifacts") {
+		t.Fatalf("expected Prometheus metric in body, got %s", string(body))
 	}
 }
 
@@ -282,10 +305,10 @@ func TestPublishRejectsMissingManifest(t *testing.T) {
 	skillMD := "# hi\n"
 	skillMDSum := sha256.Sum256([]byte(skillMD))
 	files := map[string]string{
-		"SKILL.md":     skillMD,
-		"VERSION":      "1.0.0\n",
-		"skill.yaml":   "name: my-skill\nnamespace: test\nversion: 1.0.0\ndescription: t\nowners:\n  - t\nlicense: MIT\ncompatible_with:\n  - codex\nentrypoint: SKILL.md\nsecurity:\n  requires_network: false\n  requires_secrets: false\n  writes_files: false\n  runs_commands: false\n",
-		"CHANGELOG.md": "# Changelog\n\n## 1.0.0\n\n### Added\n- init\n",
+		"SKILL.md":      skillMD,
+		"VERSION":       "1.0.0\n",
+		"skill.yaml":    "name: my-skill\nnamespace: test\nversion: 1.0.0\ndescription: t\nowners:\n  - t\nlicense: MIT\ncompatible_with:\n  - codex\nentrypoint: SKILL.md\nsecurity:\n  requires_network: false\n  requires_secrets: false\n  writes_files: false\n  runs_commands: false\n",
+		"CHANGELOG.md":  "# Changelog\n\n## 1.0.0\n\n### Added\n- init\n",
 		"checksums.txt": hex.EncodeToString(skillMDSum[:]) + "  SKILL.md\n",
 		// manifest.json intentionally omitted
 	}
@@ -352,8 +375,8 @@ func TestPublishAcceptsZipPackage(t *testing.T) {
 	}
 }
 
-// 7. Download returns the stored bytes and an X-Skill-Digest-SHA256 header that
-//    matches the actual content hash.
+//  7. Download returns the stored bytes and an X-Skill-Digest-SHA256 header that
+//     matches the actual content hash.
 func TestDownloadMatchesStoredSHA256(t *testing.T) {
 	srv := newTestServer(t)
 	pkg := buildTgzPackage(t, "test", "my-skill", "1.0.0")

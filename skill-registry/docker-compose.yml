@@ -1,20 +1,42 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: skill-registry-postgres
+    environment:
+      POSTGRES_DB: skillforge
+      POSTGRES_USER: skillforge
+      POSTGRES_PASSWORD: skillforge
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U skillforge -d skillforge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   registry:
     build:
       context: ../..
       dockerfile: SkillForge/skill-registry/Dockerfile
     image: skill-registry:latest
     container_name: skill-registry
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     volumes:
-      - ./data:/app/data
+      - registry-data:/app/data
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - SKILL_REGISTRY_ADDR=:8080
       - SKILL_REGISTRY_DATA_DIR=/app/data
-      - SKILL_REGISTRY_DB_PATH=/app/data/registry.db
-      - SKILL_REGISTRY_AUTH_ENABLED=true  # Authentication enabled by default
+      - SKILL_REGISTRY_DB_DRIVER=postgres
+      - SKILL_REGISTRY_DB_DSN=postgres://skillforge:skillforge@postgres:5432/skillforge?sslmode=disable
+      - SKILL_REGISTRY_AUTH_ENABLED=true
+      - SKILL_REGISTRY_INITIAL_ADMIN_USER=admin
+      - SKILL_REGISTRY_INITIAL_ADMIN_PASSWORD=changeme
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
@@ -22,3 +44,22 @@ services:
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  nginx:
+    image: nginx:alpine
+    container_name: skill-registry-nginx
+    ports:
+      - "8082:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      registry:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  registry-data:
+    driver: local
+  postgres-data:
+    driver: local

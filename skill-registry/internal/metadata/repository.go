@@ -8,31 +8,41 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/skillforge/skill-registry/internal/database"
+	"github.com/skillforge/skill-registry/internal/dbmigrate"
 )
 
-// Repository manages skill metadata in SQLite
+// Repository manages skill metadata.
 type Repository struct {
-	db *sql.DB
+	db     *sql.DB
+	driver string
 }
 
 // NewRepository creates a new metadata repository
 func NewRepository(dbPath string) (*Repository, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	return NewRepositoryWithConfig(database.DriverSQLite, dbPath)
+}
+
+// NewRepositoryWithConfig creates a repository for the selected database backend.
+func NewRepositoryWithConfig(driver, dsn string) (*Repository, error) {
+	db, err := database.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
-
-	repo := &Repository{db: db}
+	repo := &Repository{db: db, driver: driver}
 	if err := repo.migrate(); err != nil {
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return repo, nil
+}
+
+// Ping checks that the database connection is alive.
+func (r *Repository) Ping(ctx context.Context) error {
+	return r.db.PingContext(ctx)
 }
 
 // Close closes the database connection
@@ -46,6 +56,159 @@ func (r *Repository) GetDB() *sql.DB {
 }
 
 func (r *Repository) migrate() error {
+	if err := dbmigrate.Run(r.db, "meta_001_initial", func(tx *sql.Tx) error {
+		return r.applyInitialSchema(tx)
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_002_artifact_readme", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE artifacts ADD COLUMN readme TEXT NOT NULL DEFAULT ''`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_003_namespace_verified", func(tx *sql.Tx) error {
+		// Ensure namespace_profiles exists (may not be present in DBs predating its addition to initial schema)
+		if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS namespace_profiles (
+			namespace TEXT PRIMARY KEY,
+			bio TEXT NOT NULL DEFAULT '',
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`ALTER TABLE namespace_profiles ADD COLUMN verified INTEGER NOT NULL DEFAULT 0`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_004_display_name", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE namespace_profiles ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_005_download_trend", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS artifact_download_trend (
+			artifact_id INTEGER NOT NULL,
+			day TEXT NOT NULL,
+			count INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (artifact_id, day)
+		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_006_version_notes", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE artifact_versions ADD COLUMN release_notes TEXT NOT NULL DEFAULT ''`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_007_webhook_deliveries", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS webhook_deliveries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			webhook_id INTEGER NOT NULL,
+			namespace TEXT NOT NULL,
+			event TEXT NOT NULL DEFAULT 'test',
+			status_code INTEGER NOT NULL DEFAULT 0,
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			success INTEGER NOT NULL DEFAULT 0,
+			delivered_at DATETIME NOT NULL
+		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_008_pinned", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`ALTER TABLE namespace_profiles ADD COLUMN pinned TEXT NOT NULL DEFAULT '[]'`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_009_notifications", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS notifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			username TEXT NOT NULL,
+			type TEXT NOT NULL DEFAULT 'info',
+			message TEXT NOT NULL,
+			link TEXT NOT NULL DEFAULT '',
+			read INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL
+		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_010_stars", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS artifact_stars (
+			artifact_id INTEGER NOT NULL,
+			username TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (artifact_id, username)
+		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_011_scan_results", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS scan_results (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			artifact_version_id INTEGER NOT NULL,
+			severity TEXT NOT NULL DEFAULT 'unknown',
+			cve_id TEXT NOT NULL DEFAULT '',
+			package_name TEXT NOT NULL DEFAULT '',
+			description TEXT NOT NULL DEFAULT '',
+			fixed_version TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL
+		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_012_comments", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS artifact_comments (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			kind TEXT NOT NULL,
+			namespace TEXT NOT NULL,
+			name TEXT NOT NULL,
+			username TEXT NOT NULL,
+			body TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	if err := dbmigrate.Run(r.db, "meta_013_collections", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS collections (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			owner TEXT NOT NULL,
+			slug TEXT NOT NULL,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			artifacts TEXT NOT NULL DEFAULT '[]',
+			visibility TEXT NOT NULL DEFAULT 'public',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(owner, slug)
+		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	return dbmigrate.Run(r.db, "meta_014_follows", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS namespace_follows (
+			follower TEXT NOT NULL,
+			namespace TEXT NOT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY (follower, namespace)
+		)`)
+		return err
+	})
+}
+
+func (r *Repository) applyInitialSchema(tx *sql.Tx) error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS skills (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -226,6 +389,12 @@ func (r *Repository) migrate() error {
 		FOREIGN KEY (artifact_version_id) REFERENCES artifact_versions(id)
 	);
 
+	CREATE TABLE IF NOT EXISTS namespace_profiles (
+		namespace TEXT PRIMARY KEY,
+		bio TEXT NOT NULL DEFAULT '',
+		updated_at DATETIME NOT NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_artifacts_lookup ON artifacts(kind, namespace, name);
 	CREATE INDEX IF NOT EXISTS idx_artifact_versions_lookup ON artifact_versions(kind, namespace, name, version);
 
@@ -256,7 +425,7 @@ func (r *Repository) migrate() error {
 	JOIN artifacts a ON a.kind = 'skill' AND a.namespace = s.namespace AND a.name = s.name;
 	`
 
-	if _, err := r.db.Exec(schema); err != nil {
+	if _, err := tx.Exec(schema); err != nil {
 		return err
 	}
 	for _, stmt := range []string{
@@ -266,7 +435,7 @@ func (r *Repository) migrate() error {
 		`ALTER TABLE skill_versions ADD COLUMN status_actor TEXT DEFAULT ''`,
 		`ALTER TABLE skill_versions ADD COLUMN status_updated_at DATETIME`,
 	} {
-		if _, err := r.db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		if _, err := tx.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}
 	}
@@ -687,6 +856,45 @@ func (r *Repository) LogAudit(ctx context.Context, log *AuditLog) error {
 	).Scan(&log.ID)
 
 	return err
+}
+
+// MetricsSnapshot holds registry-wide counters for the /metrics and /stats endpoints.
+type MetricsSnapshot struct {
+	TotalSkills        int64 `json:"total_skills"`
+	TotalVersions      int64 `json:"total_versions"`
+	ActiveVersions     int64 `json:"active_versions"`
+	YankedVersions     int64 `json:"yanked_versions"`
+	DeprecatedVersions int64 `json:"deprecated_versions"`
+	TotalDownloads     int64 `json:"total_downloads"`
+	ActiveTokens       int64 `json:"active_tokens"`
+	// Artifact-level aggregates (used by the web UI stats bar)
+	TotalArtifacts  int64 `json:"total_artifacts"`
+	TotalNamespaces int64 `json:"total_namespaces"`
+}
+
+// GetMetricsSnapshot queries key counters from the database.
+func (r *Repository) GetMetricsSnapshot(ctx context.Context) (*MetricsSnapshot, error) {
+	m := &MetricsSnapshot{}
+	queries := []struct {
+		dest *int64
+		q    string
+	}{
+		{&m.TotalSkills, `SELECT COUNT(*) FROM skills`},
+		{&m.TotalVersions, `SELECT COUNT(*) FROM skill_versions`},
+		{&m.ActiveVersions, `SELECT COUNT(*) FROM skill_versions WHERE yanked = 0 AND deprecated = 0`},
+		{&m.YankedVersions, `SELECT COUNT(*) FROM skill_versions WHERE yanked = 1`},
+		{&m.DeprecatedVersions, `SELECT COUNT(*) FROM skill_versions WHERE deprecated = 1`},
+		{&m.TotalDownloads, `SELECT COALESCE(SUM(count), 0) FROM download_counts`},
+		{&m.ActiveTokens, `SELECT COUNT(*) FROM tokens WHERE revoked_at IS NULL`},
+		{&m.TotalArtifacts, `SELECT COUNT(*) FROM artifacts`},
+		{&m.TotalNamespaces, `SELECT COUNT(DISTINCT namespace) FROM artifacts`},
+	}
+	for _, row := range queries {
+		if err := r.db.QueryRowContext(ctx, row.q).Scan(row.dest); err != nil {
+			return nil, err
+		}
+	}
+	return m, nil
 }
 
 func boolToInt(b bool) int {

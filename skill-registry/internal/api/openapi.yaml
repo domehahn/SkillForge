@@ -1,0 +1,1435 @@
+openapi: 3.0.3
+info:
+  title: SkillForge Registry API
+  version: 1.0.0
+  description: |
+    The SkillForge Registry API for publishing, discovering, and managing AI skills,
+    agents, flows, prompts, tools, and bundles.
+
+    ## Authentication
+
+    Public read endpoints (browsing, downloading public artifacts) require no authentication.
+    Write operations and token management require a Bearer token:
+
+    ```
+    Authorization: Bearer <your-token>
+    ```
+
+    Obtain a token via `POST /api/v1/auth/login` or create a long-lived API token in the
+    web UI under **Account → Tokens**.
+
+    ## Scopes
+
+    | Scope | Description |
+    |-------|-------------|
+    | `read` | Read artifacts and metadata |
+    | `write` | Publish and manage artifacts |
+    | `delete` | Delete artifact versions |
+    | `token:create` | Create API tokens |
+    | `token:revoke` | Revoke API tokens |
+    | `namespace:admin` | Manage namespace members |
+    | `admin` | Full access including audit log |
+
+servers:
+  - url: /api/v1
+    description: Registry API v1
+
+tags:
+  - name: Discovery
+    description: Browse, search, and filter artifacts
+  - name: Artifacts
+    description: Publish, retrieve, download, and manage artifact lifecycle
+  - name: Skills
+    description: Legacy skill endpoints (v1 compatibility)
+  - name: Auth
+    description: Login and API token management
+  - name: Namespaces
+    description: Namespace members and webhooks
+  - name: Admin
+    description: Audit log and administrative operations
+  - name: System
+    description: Health checks, metrics, and server info
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API token obtained via POST /auth/login or the web UI
+
+  parameters:
+    kind:
+      name: kind
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [skill, agent, flow, prompt, tool, bundle]
+      description: Artifact kind
+    namespace:
+      name: namespace
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Publisher namespace
+    name:
+      name: name
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Artifact name
+    version:
+      name: version
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Semver version or `latest`
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: NOT_FOUND
+            message:
+              type: string
+              example: Artifact not found
+
+    Artifact:
+      type: object
+      properties:
+        id:
+          type: integer
+        kind:
+          type: string
+          enum: [skill, agent, flow, prompt, tool, bundle]
+        namespace:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        readme:
+          type: string
+        latest_version:
+          type: string
+        visibility:
+          type: string
+          enum: [public, private]
+        tags:
+          type: array
+          items:
+            type: string
+        owners:
+          type: array
+          items:
+            type: string
+        downloads:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ArtifactVersion:
+      type: object
+      properties:
+        id:
+          type: integer
+        artifact_id:
+          type: integer
+        kind:
+          type: string
+        namespace:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        digest_sha256:
+          type: string
+        package_type:
+          type: string
+          enum: [tgz, zip]
+        size_bytes:
+          type: integer
+          format: int64
+        entrypoint:
+          type: string
+        signature_status:
+          type: string
+        scan_status:
+          type: string
+        validation_status:
+          type: string
+        source:
+          type: string
+        created_by:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        downloads:
+          type: integer
+          format: int64
+
+    Token:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    NamespaceMember:
+      type: object
+      properties:
+        namespace:
+          type: string
+        username:
+          type: string
+        role:
+          type: string
+          enum: [owner, maintainer, reader]
+        created_at:
+          type: string
+          format: date-time
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: integer
+        namespace:
+          type: string
+        url:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    ValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              file:
+                type: string
+              message:
+                type: string
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+              file:
+                type: string
+              message:
+                type: string
+
+paths:
+  # ── System ────────────────────────────────────────────────────────────────
+
+  /metadata:
+    get:
+      tags: [System]
+      summary: Server metadata
+      description: Returns registry version, supported kinds, auth mode, and feature flags.
+      operationId: getMetadata
+      responses:
+        "200":
+          description: Server metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  auth_mode:
+                    type: string
+                  auth_enabled:
+                    type: boolean
+                  supported_kinds:
+                    type: array
+                    items:
+                      type: string
+
+  /capabilities:
+    get:
+      tags: [System]
+      summary: Server capabilities
+      description: Lists supported package types, max package size, and blocked extensions.
+      operationId: getCapabilities
+      responses:
+        "200":
+          description: Capability list
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus metrics
+      description: Exposes registry database counters in Prometheus text format.
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  # ── Discovery ─────────────────────────────────────────────────────────────
+
+  /stats:
+    get:
+      tags: [Discovery]
+      summary: Registry statistics
+      description: Returns total artifact, version, download, and publisher counts.
+      operationId: getStats
+      responses:
+        "200":
+          description: Registry stats snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_skills:
+                    type: integer
+                  total_versions:
+                    type: integer
+                  active_versions:
+                    type: integer
+                  total_downloads:
+                    type: integer
+                    format: int64
+                  active_tokens:
+                    type: integer
+                  total_artifacts:
+                    type: integer
+                  total_namespaces:
+                    type: integer
+
+  /artifacts/facets:
+    get:
+      tags: [Discovery]
+      summary: Kind facets
+      description: Returns per-kind artifact counts, optionally filtered by a search query. Used to populate sidebar filters.
+      operationId: getArtifactFacets
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Optional search term
+      responses:
+        "200":
+          description: Kind → count map
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  facets:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                    example:
+                      skill: 18
+                      agent: 4
+                      tool: 2
+
+  /artifacts:
+    get:
+      tags: [Discovery]
+      summary: List artifacts
+      description: Returns a paginated, searchable list of artifacts. Public artifacts are visible without authentication.
+      operationId: listArtifacts
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Full-text search (name, description, tags)
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [skill, agent, flow, prompt, tool, bundle]
+          description: Filter by kind
+        - name: namespace
+          in: query
+          schema:
+            type: string
+          description: Filter by publisher namespace
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [updated, pulls, name]
+            default: updated
+          description: Sort order
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Paginated artifact list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artifacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Artifact"
+                  total:
+                    type: integer
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+
+  /namespaces/{namespace}:
+    get:
+      tags: [Discovery]
+      summary: Namespace overview
+      description: Returns namespace stats (artifact count, total pulls) and all artifacts published under the namespace.
+      operationId: getNamespace
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+      responses:
+        "200":
+          description: Namespace info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  namespace:
+                    type: string
+                  artifact_count:
+                    type: integer
+                  total_pulls:
+                    type: integer
+                    format: int64
+                  artifacts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Artifact"
+                  total:
+                    type: integer
+
+  # ── Artifacts ─────────────────────────────────────────────────────────────
+
+  /artifacts/{kind}/{namespace}/{name}:
+    get:
+      tags: [Artifacts]
+      summary: Get artifact
+      description: Returns full artifact details including all versions and dist-tags.
+      operationId: getArtifact
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+      responses:
+        "200":
+          description: Artifact with versions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  artifact:
+                    $ref: "#/components/schemas/Artifact"
+                  versions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ArtifactVersion"
+                  dist_tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /artifacts/{kind}/{namespace}/{name}/versions/{version}:
+    get:
+      tags: [Artifacts]
+      summary: Get artifact version
+      description: Returns a specific version or resolves `latest`.
+      operationId: getArtifactVersion
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Artifact version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactVersion"
+        "404":
+          description: Not found
+
+    put:
+      tags: [Artifacts]
+      summary: Publish artifact version
+      description: |
+        Upload a new artifact version as a `.tgz` or `.zip` archive.
+
+        ```bash
+        skforge publish --namespace myorg --name my-skill --version 1.2.0 my-skill.tgz
+        ```
+      operationId: publishArtifact
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema:
+              type: string
+              format: binary
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Version published
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Version already exists
+
+  /artifacts/{kind}/{namespace}/{name}/versions/{version}/download:
+    get:
+      tags: [Artifacts]
+      summary: Download artifact version
+      description: Returns the artifact archive. Sets `Content-Disposition` for direct download.
+      operationId: downloadArtifact
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Archive file
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+            application/zip:
+              schema:
+                type: string
+                format: binary
+          headers:
+            X-Artifact-Digest-SHA256:
+              schema:
+                type: string
+        "404":
+          description: Not found
+
+  /artifacts/{kind}/{namespace}/{name}/versions/{version}/graph:
+    get:
+      tags: [Artifacts]
+      summary: Dependency graph
+      description: Returns the resolved dependency graph for this artifact version.
+      operationId: getArtifactGraph
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Dependency graph
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes:
+                    type: array
+                    items:
+                      type: object
+                  edges:
+                    type: array
+                    items:
+                      type: object
+
+  /artifacts/{kind}/{namespace}/{name}/versions/{version}/lockfile:
+    get:
+      tags: [Artifacts]
+      summary: Lockfile
+      description: Returns the resolved lockfile for reproducible installs.
+      operationId: getArtifactLockfile
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Lockfile JSON
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /artifacts/{kind}/{namespace}/{name}/versions/{version}/attestations:
+    get:
+      tags: [Artifacts]
+      summary: List attestations
+      operationId: listArtifactAttestations
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Attestation list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attestations:
+                    type: array
+                    items:
+                      type: object
+
+    post:
+      tags: [Artifacts]
+      summary: Create attestation
+      description: Attach a custom attestation (SLSA provenance, SBOM, etc.) to a version.
+      operationId: createArtifactAttestation
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, digest]
+              properties:
+                type:
+                  type: string
+                  example: slsa-provenance
+                digest:
+                  type: string
+                predicate:
+                  type: object
+      responses:
+        "201":
+          description: Attestation created
+        "400":
+          description: Invalid request
+
+  /artifacts/{kind}/{namespace}/{name}/promotions:
+    get:
+      tags: [Artifacts]
+      summary: List promotions
+      description: Returns the promotion history (which versions were promoted to which channels).
+      operationId: listPromotions
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Promotion list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promotions:
+                    type: array
+                    items:
+                      type: object
+
+    post:
+      tags: [Artifacts]
+      summary: Promote artifact version
+      description: Promote a version to a release channel (e.g. `stable`, `beta`).
+      operationId: promoteArtifact
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/kind"
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, channel]
+              properties:
+                version:
+                  type: string
+                channel:
+                  type: string
+                  example: stable
+      responses:
+        "200":
+          description: Promoted
+        "400":
+          description: Invalid request
+
+  # ── Skills (v1 compat) ────────────────────────────────────────────────────
+
+  /skills:
+    get:
+      tags: [Skills]
+      summary: List skills
+      description: Legacy endpoint. Prefer `GET /artifacts?kind=skill`.
+      operationId: listSkills
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: namespace
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        "200":
+          description: Skill list
+
+  /skills/{namespace}/{name}:
+    get:
+      tags: [Skills]
+      summary: Get skill
+      operationId: getSkill
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+      responses:
+        "200":
+          description: Skill metadata
+        "404":
+          description: Not found
+
+  /skills/{namespace}/{name}/versions/{version}:
+    get:
+      tags: [Skills]
+      summary: Get skill version
+      operationId: getSkillVersion
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      responses:
+        "200":
+          description: Skill version
+
+    put:
+      tags: [Skills]
+      summary: Publish skill version
+      description: Upload a skill package archive. See `PUT /artifacts/skill/{namespace}/{name}/versions/{version}` for the unified endpoint.
+      operationId: publishSkill
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema:
+              type: string
+              format: binary
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Published
+        "400":
+          description: Validation error
+        "409":
+          description: Version exists
+
+    delete:
+      tags: [Skills]
+      summary: Delete skill version
+      operationId: deleteSkillVersion
+      security:
+        - bearerAuth: [delete]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      responses:
+        "200":
+          description: Deleted
+        "404":
+          description: Not found
+
+  /skills/{namespace}/{name}/versions/{version}/download:
+    get:
+      tags: [Skills]
+      summary: Download skill version
+      operationId: downloadSkill
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      security:
+        - bearerAuth: []
+        - {}
+      responses:
+        "200":
+          description: Archive
+          content:
+            application/gzip:
+              schema:
+                type: string
+                format: binary
+
+  /skills/{namespace}/{name}/resolve:
+    get:
+      tags: [Skills]
+      summary: Resolve dependencies
+      description: Returns the fully resolved dependency graph for a skill.
+      operationId: resolveSkill
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - name: version
+          in: query
+          schema:
+            type: string
+            default: latest
+      responses:
+        "200":
+          description: Resolved dependency graph
+
+  /skills/{namespace}/{name}/dist-tags:
+    get:
+      tags: [Skills]
+      summary: List dist-tags
+      description: Returns named version aliases (e.g. `latest`, `stable`, `beta`).
+      operationId: listDistTags
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+      responses:
+        "200":
+          description: Tag → version map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+
+  /skills/{namespace}/{name}/dist-tags/{tag}:
+    put:
+      tags: [Skills]
+      summary: Set dist-tag
+      operationId: setDistTag
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version:
+                  type: string
+      responses:
+        "200":
+          description: Tag updated
+
+  /skills/{namespace}/{name}/versions/{version}/deprecate:
+    post:
+      tags: [Skills]
+      summary: Deprecate version
+      operationId: deprecateVersion
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      responses:
+        "200":
+          description: Deprecated
+
+  /skills/{namespace}/{name}/versions/{version}/yank:
+    post:
+      tags: [Skills]
+      summary: Yank version
+      description: Marks a version as yanked — it remains downloadable by pinned users but is hidden from discovery.
+      operationId: yankVersion
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      responses:
+        "200":
+          description: Yanked
+
+  /skills/{namespace}/{name}/versions/{version}/unyank:
+    post:
+      tags: [Skills]
+      summary: Un-yank version
+      operationId: unyankVersion
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+        - $ref: "#/components/parameters/name"
+        - $ref: "#/components/parameters/version"
+      responses:
+        "200":
+          description: Un-yanked
+
+  /validate:
+    post:
+      tags: [Skills]
+      summary: Validate package
+      description: |
+        Validate a skill package archive without publishing it. Returns errors and warnings.
+
+        ```bash
+        skforge validate my-skill.tgz
+        ```
+      operationId: validate
+      security:
+        - bearerAuth: [write]
+      requestBody:
+        required: true
+        content:
+          application/gzip:
+            schema:
+              type: string
+              format: binary
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResult"
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: Authenticate with username and password. Returns a session token valid for 30 days.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  example: admin
+                password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    type: string
+                  role:
+                    type: string
+                  scopes:
+                    type: array
+                    items:
+                      type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+        "401":
+          description: Invalid credentials
+
+  /auth/verify-email:
+    get:
+      tags: [Auth]
+      summary: Verify email
+      description: Verifies an account email address using a one-time token.
+      operationId: verifyEmailByQuery
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Email verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  user:
+                    type: string
+                  email:
+                    type: string
+                  email_verified:
+                    type: boolean
+        "400":
+          description: Invalid, expired, or reused token
+    post:
+      tags: [Auth]
+      summary: Verify email
+      description: Verifies an account email address using a one-time token.
+      operationId: verifyEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        "200":
+          description: Email verified
+        "400":
+          description: Invalid, expired, or reused token
+
+  /tokens:
+    get:
+      tags: [Auth]
+      summary: List tokens
+      description: Returns all active tokens for the authenticated user.
+      operationId: listTokens
+      security:
+        - bearerAuth: [read]
+      responses:
+        "200":
+          description: Token list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Token"
+
+    post:
+      tags: [Auth]
+      summary: Create token
+      description: Create a long-lived API token with specific scopes and optional expiry.
+      operationId: createToken
+      security:
+        - bearerAuth: [token:create]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name:
+                  type: string
+                  example: ci-pipeline
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                  example: [read, write]
+                expires_in:
+                  type: integer
+                  description: Expiry in seconds. Omit for non-expiring token.
+                  example: 7776000
+      responses:
+        "201":
+          description: Token created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                    description: The raw token value — shown only once.
+        "400":
+          description: Invalid request
+        "403":
+          description: Scope not allowed for your role
+
+  /tokens/{id}:
+    delete:
+      tags: [Auth]
+      summary: Revoke token
+      operationId: revokeToken
+      security:
+        - bearerAuth: [token:revoke]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Token revoked
+        "404":
+          description: Not found
+
+  # ── Namespaces ────────────────────────────────────────────────────────────
+
+  /namespaces/{namespace}/members:
+    get:
+      tags: [Namespaces]
+      summary: List namespace members
+      operationId: listNamespaceMembers
+      security:
+        - bearerAuth: [namespace:admin]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+      responses:
+        "200":
+          description: Member list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NamespaceMember"
+
+    put:
+      tags: [Namespaces]
+      summary: Add or update member
+      description: Adds a user to the namespace with the given role, or updates their existing role.
+      operationId: upsertNamespaceMember
+      security:
+        - bearerAuth: [namespace:admin]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, role]
+              properties:
+                username:
+                  type: string
+                role:
+                  type: string
+                  enum: [owner, maintainer, reader]
+      responses:
+        "200":
+          description: Member updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NamespaceMember"
+
+  /namespaces/{namespace}/webhooks:
+    get:
+      tags: [Namespaces]
+      summary: List webhooks
+      operationId: listWebhooks
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+      responses:
+        "200":
+          description: Webhook list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Webhook"
+
+    post:
+      tags: [Namespaces]
+      summary: Create webhook
+      description: |
+        Registers a webhook URL to receive events for this namespace.
+
+        **Events:** `publish`, `yank`, `delete`, `promote`
+      operationId: createWebhook
+      security:
+        - bearerAuth: [write]
+      parameters:
+        - $ref: "#/components/parameters/namespace"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                events:
+                  type: array
+                  items:
+                    type: string
+                    enum: [publish, yank, delete, promote]
+      responses:
+        "201":
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Webhook"
+
+  # ── Admin ─────────────────────────────────────────────────────────────────
+
+  /audit:
+    get:
+      tags: [Admin]
+      summary: Audit log
+      description: Returns a paginated audit log of all registry operations. Requires `admin` scope.
+      operationId: getAuditLog
+      security:
+        - bearerAuth: [admin]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: namespace
+          in: query
+          schema:
+            type: string
+        - name: actor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        action:
+                          type: string
+                        actor:
+                          type: string
+                        namespace:
+                          type: string
+                        name:
+                          type: string
+                        version:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
+        "403":
+          description: Insufficient permissions
+
+  /admin/users/{username}/send-verification:
+    post:
+      tags: [Admin]
+      summary: Send email verification
+      description: Creates a fresh one-time verification token and sends it through SMTP when enabled.
+      operationId: adminSendVerification
+      security:
+        - bearerAuth: [admin]
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Verification sent or token returned for non-SMTP environments
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: User has no email address
+        "403":
+          description: Insufficient permissions
+        "404":
+          description: User not found

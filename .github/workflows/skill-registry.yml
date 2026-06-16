@@ -77,4 +77,10 @@ jobs:
             skill-registry:ci
           sleep 3
           curl --fail http://localhost:18080/healthz
+          curl --fail http://localhost:18080/readyz
           docker stop skill-registry-ci
+
+      - name: Scan image for vulnerabilities
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          trivy image --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH skill-registry:ci

@@ -103,16 +103,39 @@ func (r *Registry) PublishArtifact(ctx context.Context, kind, namespace, name, v
 	}
 	_ = r.repo.LogAudit(ctx, &metadata.AuditLog{Action: "artifact.publish", Namespace: namespace, Name: name, Version: version, Actor: actor, Success: true, Message: kind})
 	r.deliverWebhookEvent(ctx, namespace, "artifact.published", map[string]interface{}{"artifact": artifact, "version": artifactVersion})
+	if members, err := r.repo.ListNamespaceMembers(ctx, namespace); err == nil {
+		for _, m := range members {
+			if m.Username == actor {
+				continue
+			}
+			_ = r.repo.AddNotification(ctx, &metadata.Notification{
+				Username: m.Username,
+				Type:     "publish",
+				Message:  fmt.Sprintf("%s published %s/%s@%s", actor, namespace, name, version),
+				Link:     "/artifacts/" + kind + "/" + namespace + "/" + name,
+			})
+		}
+	}
 	return &ArtifactPublishResult{Artifact: artifact, Version: artifactVersion, Warnings: warnings}, nil
 }
 
-func (r *Registry) ListArtifacts(ctx context.Context, kind, query, namespace string, limit, offset int) ([]metadata.Artifact, int, error) {
+func (r *Registry) ListArtifacts(ctx context.Context, kind, query, namespace, sort string, limit, offset int, verified bool) ([]metadata.Artifact, int, error) {
 	if kind != "" {
 		if err := validation.ValidateArtifactKind(kind); err != nil {
 			return nil, 0, err
 		}
 	}
-	return r.repo.ListArtifacts(ctx, kind, query, namespace, limit, offset)
+	return r.repo.ListArtifacts(ctx, kind, query, namespace, sort, limit, offset, verified)
+}
+
+// KindFacets returns per-kind artifact counts for a query.
+func (r *Registry) KindFacets(ctx context.Context, query string) (map[string]int, error) {
+	return r.repo.KindFacets(ctx, query)
+}
+
+// NamespaceStats returns summary stats for a namespace.
+func (r *Registry) NamespaceStats(ctx context.Context, namespace string) (int, int64, error) {
+	return r.repo.NamespaceStats(ctx, namespace)
 }
 
 func (r *Registry) GetArtifact(ctx context.Context, kind, namespace, name string) (*metadata.Artifact, []metadata.ArtifactVersion, map[string]string, error) {
@@ -246,6 +269,10 @@ func (r *Registry) UpsertNamespaceMember(ctx context.Context, namespace, usernam
 
 func (r *Registry) ListNamespaceMembers(ctx context.Context, namespace string) ([]metadata.NamespaceMember, error) {
 	return r.repo.ListNamespaceMembers(ctx, namespace)
+}
+
+func (r *Registry) RemoveNamespaceMember(ctx context.Context, namespace, username string) error {
+	return r.repo.RemoveNamespaceMember(ctx, namespace, username)
 }
 
 func (r *Registry) AuthorizeNamespace(ctx context.Context, namespace, username, requiredRole string) (bool, error) {
@@ -440,4 +467,202 @@ func semverMatches(version, constraint string) bool {
 		return v[0] == b[0] && v[1] == b[1] && cmp >= 0
 	}
 	return version == constraint
+}
+
+func (r *Registry) UpdateArtifactMeta(ctx context.Context, kind, namespace, name string, description, readme *string, tags []string, visibility *string) error {
+	return r.repo.UpdateArtifactMeta(ctx, kind, namespace, name, description, readme, tags, visibility)
+}
+
+func (r *Registry) GetNamespaceBio(ctx context.Context, namespace string) string {
+	return r.repo.GetNamespaceBio(ctx, namespace)
+}
+
+func (r *Registry) SetNamespaceBio(ctx context.Context, namespace, bio string) error {
+	return r.repo.SetNamespaceBio(ctx, namespace, bio)
+}
+
+func (r *Registry) GetNamespaceVerified(ctx context.Context, namespace string) bool {
+	return r.repo.GetNamespaceVerified(ctx, namespace)
+}
+
+func (r *Registry) SetNamespaceVerified(ctx context.Context, namespace string, verified bool) error {
+	return r.repo.SetNamespaceVerified(ctx, namespace, verified)
+}
+
+func (r *Registry) GetDisplayName(ctx context.Context, namespace string) string {
+	return r.repo.GetDisplayName(ctx, namespace)
+}
+
+func (r *Registry) SetDisplayName(ctx context.Context, namespace, displayName string) error {
+	return r.repo.SetDisplayName(ctx, namespace, displayName)
+}
+
+func (r *Registry) ListAdminNamespaces(ctx context.Context) ([]metadata.NamespaceInfo, error) {
+	return r.repo.ListAdminNamespaces(ctx)
+}
+
+func (r *Registry) GetArtifactDownloadTrend(ctx context.Context, kind, namespace, name string, days int) ([]metadata.DayCount, error) {
+	a, err := r.repo.GetArtifact(ctx, kind, namespace, name)
+	if err != nil || a == nil {
+		return nil, err
+	}
+	return r.repo.GetArtifactDownloadTrend(ctx, a.ID, days)
+}
+
+func (r *Registry) SetVersionReleaseNotes(ctx context.Context, kind, namespace, name, version, notes string) error {
+	return r.repo.SetVersionReleaseNotes(ctx, kind, namespace, name, version, notes)
+}
+
+func (r *Registry) LogWebhookDelivery(ctx context.Context, d *metadata.WebhookDelivery) error {
+	return r.repo.LogWebhookDelivery(ctx, d)
+}
+
+func (r *Registry) ListWebhookDeliveries(ctx context.Context, webhookID int64) ([]metadata.WebhookDelivery, error) {
+	return r.repo.ListWebhookDeliveries(ctx, webhookID)
+}
+
+func (r *Registry) DeleteWebhook(ctx context.Context, webhookID int64) error {
+	return r.repo.DeleteWebhook(ctx, webhookID)
+}
+
+func (r *Registry) GetArtifactUsedBy(ctx context.Context, namespace, name string) ([]metadata.DependentArtifact, error) {
+	return r.repo.GetArtifactUsedBy(ctx, namespace, name)
+}
+
+func (r *Registry) ListTopPublishers(ctx context.Context, limit int) ([]metadata.PublisherInfo, error) {
+	return r.repo.ListTopPublishers(ctx, limit)
+}
+
+func (r *Registry) GetPinnedArtifacts(ctx context.Context, namespace string) []string {
+	return r.repo.GetPinnedArtifacts(ctx, namespace)
+}
+
+func (r *Registry) SetPinnedArtifacts(ctx context.Context, namespace string, pinned []string) error {
+	return r.repo.SetPinnedArtifacts(ctx, namespace, pinned)
+}
+
+func (r *Registry) AddNotification(ctx context.Context, n *metadata.Notification) error {
+	return r.repo.AddNotification(ctx, n)
+}
+
+func (r *Registry) GetNotifications(ctx context.Context, username string) ([]metadata.Notification, error) {
+	return r.repo.GetNotifications(ctx, username)
+}
+
+func (r *Registry) MarkNotificationsRead(ctx context.Context, username string) error {
+	return r.repo.MarkNotificationsRead(ctx, username)
+}
+
+func (r *Registry) DeleteNotification(ctx context.Context, id int64, username string) error {
+	return r.repo.DeleteNotification(ctx, id, username)
+}
+
+func (r *Registry) StarArtifact(ctx context.Context, kind, namespace, name, username string) error {
+	artifact, err := r.repo.GetArtifact(ctx, kind, namespace, name)
+	if err != nil || artifact == nil {
+		return fmt.Errorf("artifact not found")
+	}
+	return r.repo.StarArtifact(ctx, artifact.ID, username)
+}
+
+func (r *Registry) UnstarArtifact(ctx context.Context, kind, namespace, name, username string) error {
+	artifact, err := r.repo.GetArtifact(ctx, kind, namespace, name)
+	if err != nil || artifact == nil {
+		return fmt.Errorf("artifact not found")
+	}
+	return r.repo.UnstarArtifact(ctx, artifact.ID, username)
+}
+
+func (r *Registry) GetStarInfo(ctx context.Context, kind, namespace, name, username string) (int64, bool) {
+	artifact, err := r.repo.GetArtifact(ctx, kind, namespace, name)
+	if err != nil || artifact == nil {
+		return 0, false
+	}
+	count := r.repo.GetStarCount(ctx, artifact.ID)
+	starred := username != "" && r.repo.IsStarred(ctx, artifact.ID, username)
+	return count, starred
+}
+
+func (r *Registry) ListScanResults(ctx context.Context, kind, namespace, name, version string) ([]metadata.ScanResult, error) {
+	v, err := r.ResolveArtifactVersion(ctx, kind, namespace, name, version)
+	if err != nil {
+		return nil, err
+	}
+	return r.repo.ListScanResults(ctx, v.ID)
+}
+
+func (r *Registry) AddScanResult(ctx context.Context, s *metadata.ScanResult) error {
+	return r.repo.AddScanResult(ctx, s)
+}
+
+func (r *Registry) ClearScanResults(ctx context.Context, kind, namespace, name, version string) error {
+	v, err := r.ResolveArtifactVersion(ctx, kind, namespace, name, version)
+	if err != nil {
+		return err
+	}
+	return r.repo.ClearScanResults(ctx, v.ID)
+}
+
+func (r *Registry) ListComments(ctx context.Context, kind, namespace, name string) ([]metadata.ArtifactComment, error) {
+	return r.repo.ListComments(ctx, kind, namespace, name)
+}
+
+func (r *Registry) AddComment(ctx context.Context, c *metadata.ArtifactComment) error {
+	return r.repo.AddComment(ctx, c)
+}
+
+func (r *Registry) UpdateComment(ctx context.Context, id int64, username, body string) error {
+	return r.repo.UpdateComment(ctx, id, username, body)
+}
+
+func (r *Registry) DeleteComment(ctx context.Context, id int64, username string) error {
+	return r.repo.DeleteComment(ctx, id, username)
+}
+
+func (r *Registry) CreateCollection(ctx context.Context, c *metadata.Collection) error {
+	return r.repo.CreateCollection(ctx, c)
+}
+
+func (r *Registry) GetCollection(ctx context.Context, owner, slug string) (*metadata.Collection, error) {
+	return r.repo.GetCollection(ctx, owner, slug)
+}
+
+func (r *Registry) ListCollections(ctx context.Context, owner string) ([]metadata.Collection, error) {
+	return r.repo.ListCollections(ctx, owner)
+}
+
+func (r *Registry) UpdateCollection(ctx context.Context, owner, slug, name, description string, artifacts []metadata.CollectionArtifact, visibility string) error {
+	return r.repo.UpdateCollection(ctx, owner, slug, name, description, artifacts, visibility)
+}
+
+func (r *Registry) DeleteCollection(ctx context.Context, owner, slug string) error {
+	return r.repo.DeleteCollection(ctx, owner, slug)
+}
+
+func (r *Registry) GetNamespaceInsights(ctx context.Context, namespace string, days int) ([]metadata.ArtifactInsight, error) {
+	return r.repo.GetNamespaceInsights(ctx, namespace, days)
+}
+
+func (r *Registry) TransferArtifact(ctx context.Context, kind, fromNS, name, toNS string) error {
+	return r.repo.TransferArtifact(ctx, kind, fromNS, name, toNS)
+}
+
+func (r *Registry) FollowNamespace(ctx context.Context, follower, namespace string) error {
+	return r.repo.FollowNamespace(ctx, follower, namespace)
+}
+
+func (r *Registry) UnfollowNamespace(ctx context.Context, follower, namespace string) error {
+	return r.repo.UnfollowNamespace(ctx, follower, namespace)
+}
+
+func (r *Registry) IsFollowing(ctx context.Context, follower, namespace string) bool {
+	return r.repo.IsFollowing(ctx, follower, namespace)
+}
+
+func (r *Registry) GetFollowerCount(ctx context.Context, namespace string) int64 {
+	return r.repo.GetFollowerCount(ctx, namespace)
+}
+
+func (r *Registry) GetFollowing(ctx context.Context, follower string) ([]string, error) {
+	return r.repo.GetFollowing(ctx, follower)
 }

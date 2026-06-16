@@ -65,6 +65,77 @@ func TestUserRepository_CreateUser(t *testing.T) {
 	}
 }
 
+func TestUserRepository_CreateUserWithEmailVerification(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo, err := NewUserRepositoryWithBcryptCost(db, 4)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+
+	ctx := context.Background()
+	user, err := repo.CreateUserWithOptions(ctx, UserCreateOptions{
+		Username:      "verified",
+		Email:         "verified@example.com",
+		Password:      "password123",
+		Role:          "user",
+		EmailVerified: true,
+	})
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	if user.Email != "verified@example.com" {
+		t.Errorf("expected email to be stored, got %q", user.Email)
+	}
+	if !user.EmailVerified {
+		t.Error("expected email to be verified")
+	}
+
+	got, err := repo.GetUser(ctx, "verified")
+	if err != nil {
+		t.Fatalf("failed to fetch user: %v", err)
+	}
+	if got.Email != user.Email || !got.EmailVerified {
+		t.Fatalf("expected fetched user to preserve email verification, got %+v", got)
+	}
+}
+
+func TestUserRepository_VerifyEmailToken(t *testing.T) {
+	db, cleanup := setupTestDB(t)
+	defer cleanup()
+
+	repo, err := NewUserRepositoryWithBcryptCost(db, 4)
+	if err != nil {
+		t.Fatalf("failed to create repository: %v", err)
+	}
+	ctx := context.Background()
+	user, err := repo.CreateUserWithOptions(ctx, UserCreateOptions{
+		Username: "unverified",
+		Email:    "unverified@example.com",
+		Password: "password123",
+		Role:     "user",
+	})
+	if err != nil {
+		t.Fatalf("failed to create user: %v", err)
+	}
+	token, err := repo.CreateEmailVerificationToken(ctx, user.ID, time.Hour)
+	if err != nil {
+		t.Fatalf("failed to create verification token: %v", err)
+	}
+
+	verified, err := repo.VerifyEmailToken(ctx, token.Token)
+	if err != nil {
+		t.Fatalf("failed to verify email token: %v", err)
+	}
+	if !verified.EmailVerified {
+		t.Fatal("expected email to be verified")
+	}
+	if _, err := repo.VerifyEmailToken(ctx, token.Token); err == nil {
+		t.Fatal("expected reused verification token to fail")
+	}
+}
+
 func TestUserRepository_AuthenticateUser(t *testing.T) {
 	db, cleanup := setupTestDB(t)
 	defer cleanup()

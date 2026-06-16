@@ -21,7 +21,12 @@ type Authenticator struct {
 
 // NewAuthenticator creates a new authenticator
 func NewAuthenticator(enabled bool, db *sql.DB) (*Authenticator, error) {
-	userRepo, err := NewUserRepository(db)
+	return NewAuthenticatorWithBcryptCost(enabled, db, 10)
+}
+
+// NewAuthenticatorWithBcryptCost creates an authenticator with configurable password hashing cost.
+func NewAuthenticatorWithBcryptCost(enabled bool, db *sql.DB, bcryptCost int) (*Authenticator, error) {
+	userRepo, err := NewUserRepositoryWithBcryptCost(db, bcryptCost)
 	if err != nil {
 		return nil, err
 	}

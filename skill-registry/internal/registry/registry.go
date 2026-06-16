@@ -184,7 +184,21 @@ func (r *Registry) Publish(ctx context.Context, namespace, name, version string,
 		"digest", digest,
 	)
 
+	r.deliverWebhookEvent(ctx, namespace, "skill.published", map[string]interface{}{
+		"namespace": namespace, "name": name, "version": version, "digest": digest,
+	})
+
 	return skillVersion, nil
+}
+
+// Metrics returns a snapshot of registry-wide counters.
+func (r *Registry) Metrics(ctx context.Context) (*metadata.MetricsSnapshot, error) {
+	return r.repo.GetMetricsSnapshot(ctx)
+}
+
+// Ping checks that the underlying database is reachable.
+func (r *Registry) Ping(ctx context.Context) error {
+	return r.repo.Ping(ctx)
 }
 
 

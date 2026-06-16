@@ -91,6 +91,8 @@ database:
   path: "/custom/db.sqlite"
 auth:
   enabled: true
+  bcrypt_cost: 12
+  require_email_verification: true
   tokens:
     - name: admin
       token_env: ADMIN_TOKEN
@@ -105,6 +107,11 @@ validation:
   blocked_extensions:
     - .exe
     - .dll
+security:
+  headers_enabled: true
+  hsts_enabled: true
+  hsts_max_age_seconds: 123
+  openapi_cors_origin: "https://docs.example.com"
 `
 
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -135,6 +142,12 @@ validation:
 	if !cfg.Auth.Enabled {
 		t.Error("expected auth enabled")
 	}
+	if cfg.Auth.BcryptCost != 12 {
+		t.Errorf("expected bcrypt cost 12, got %d", cfg.Auth.BcryptCost)
+	}
+	if !cfg.Auth.RequireEmailVerification {
+		t.Error("expected email verification requirement")
+	}
 
 	if len(cfg.Auth.Tokens) != 1 {
 		t.Errorf("expected 1 token, got %d", len(cfg.Auth.Tokens))
@@ -150,6 +163,12 @@ validation:
 
 	if len(cfg.Proxy.Upstreams) != 1 {
 		t.Errorf("expected 1 upstream, got %d", len(cfg.Proxy.Upstreams))
+	}
+	if cfg.Security.HSTSMaxAgeSeconds != 123 {
+		t.Errorf("expected HSTS max age 123, got %d", cfg.Security.HSTSMaxAgeSeconds)
+	}
+	if cfg.Security.OpenAPICORSOrigin != "https://docs.example.com" {
+		t.Errorf("expected configured OpenAPI CORS origin, got %s", cfg.Security.OpenAPICORSOrigin)
 	}
 }
 
@@ -203,6 +222,9 @@ func TestApplyEnvOverrides(t *testing.T) {
 	originalDBPath := os.Getenv("SKILL_REGISTRY_DB_PATH")
 	originalMaxSize := os.Getenv("SKILL_REGISTRY_MAX_PACKAGE_SIZE_MB")
 	originalAuthEnabled := os.Getenv("SKILL_REGISTRY_AUTH_ENABLED")
+	originalBcryptCost := os.Getenv("SKILL_REGISTRY_AUTH_BCRYPT_COST")
+	originalRequireEmail := os.Getenv("SKILL_REGISTRY_REQUIRE_EMAIL_VERIFICATION")
+	originalOpenAPIOrigin := os.Getenv("SKILL_REGISTRY_OPENAPI_CORS_ORIGIN")
 
 	// Restore after test
 	defer func() {
@@ -211,6 +233,9 @@ func TestApplyEnvOverrides(t *testing.T) {
 		os.Setenv("SKILL_REGISTRY_DB_PATH", originalDBPath)
 		os.Setenv("SKILL_REGISTRY_MAX_PACKAGE_SIZE_MB", originalMaxSize)
 		os.Setenv("SKILL_REGISTRY_AUTH_ENABLED", originalAuthEnabled)
+		os.Setenv("SKILL_REGISTRY_AUTH_BCRYPT_COST", originalBcryptCost)
+		os.Setenv("SKILL_REGISTRY_REQUIRE_EMAIL_VERIFICATION", originalRequireEmail)
+		os.Setenv("SKILL_REGISTRY_OPENAPI_CORS_ORIGIN", originalOpenAPIOrigin)
 	}()
 
 	// Set test env vars
@@ -219,6 +244,9 @@ func TestApplyEnvOverrides(t *testing.T) {
 	os.Setenv("SKILL_REGISTRY_DB_PATH", "/env/db.sqlite")
 	os.Setenv("SKILL_REGISTRY_MAX_PACKAGE_SIZE_MB", "200")
 	os.Setenv("SKILL_REGISTRY_AUTH_ENABLED", "true")
+	os.Setenv("SKILL_REGISTRY_AUTH_BCRYPT_COST", "11")
+	os.Setenv("SKILL_REGISTRY_REQUIRE_EMAIL_VERIFICATION", "true")
+	os.Setenv("SKILL_REGISTRY_OPENAPI_CORS_ORIGIN", "https://docs.example.com")
 
 	cfg := DefaultConfig()
 	applyEnvOverrides(cfg)
@@ -241,6 +269,15 @@ func TestApplyEnvOverrides(t *testing.T) {
 
 	if !cfg.Auth.Enabled {
 		t.Error("expected auth enabled")
+	}
+	if cfg.Auth.BcryptCost != 11 {
+		t.Errorf("expected bcrypt cost 11, got %d", cfg.Auth.BcryptCost)
+	}
+	if !cfg.Auth.RequireEmailVerification {
+		t.Error("expected require email verification enabled")
+	}
+	if cfg.Security.OpenAPICORSOrigin != "https://docs.example.com" {
+		t.Errorf("expected OpenAPI CORS origin override, got %s", cfg.Security.OpenAPICORSOrigin)
 	}
 }
 
@@ -400,5 +437,38 @@ func TestResolveTokens_EmptyList(t *testing.T) {
 
 	if len(tokens) != 0 {
 		t.Errorf("expected 0 tokens from empty list, got %d", len(tokens))
+	}
+}
+
+func TestValidateProductionEnforce(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Production.Mode = true
+	cfg.Production.Enforce = true
+
+	if err := cfg.ValidateProduction(); err == nil {
+		t.Fatal("expected production enforcement to fail for default development config")
+	}
+
+	cfg.Auth.Enabled = true
+	cfg.Auth.BcryptCost = 12
+	cfg.Security.HeadersEnabled = true
+	cfg.Security.OpenAPICORSOrigin = "https://registry.example.com"
+	cfg.TLS.Enabled = true
+	cfg.TLS.CertFile = filepath.Join(t.TempDir(), "cert.pem")
+	cfg.TLS.KeyFile = filepath.Join(t.TempDir(), "key.pem")
+	cfg.RateLimit.Enabled = true
+	cfg.Backup.Enabled = true
+	cfg.Auth.RequireEmailVerification = true
+	cfg.Email.SMTPEnabled = true
+	cfg.Email.SMTPHost = "smtp.example.com"
+
+	if err := os.WriteFile(cfg.TLS.CertFile, []byte("cert"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfg.TLS.KeyFile, []byte("key"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateProduction(); err != nil {
+		t.Fatalf("expected production enforcement to pass, got %v", err)
 	}
 }

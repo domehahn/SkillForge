@@ -48,6 +48,7 @@ type ValidationResult struct {
 	Files            []string                `json:"files,omitempty"`
 	Deterministic    bool                    `json:"deterministic"`
 	Profile          Profile                 `json:"profile"`
+	Readme           string                  `json:"-"` // extracted README.md or SKILL.md content
 }
 
 type packageFile struct {
@@ -332,10 +333,17 @@ func (v *Validator) validateFiles(files []packageFile, result *ValidationResult)
 	} else if len(bytes.TrimSpace(skillFile.Content)) == 0 {
 		result.addError("EMPTY_SKILL_MD", skillFile.Name, "SKILL.md is empty")
 	}
-	if _, ok := findByBase(byPath, "README.md"); !ok {
+	if readmeFile, ok := findByBase(byPath, "README.md"); !ok {
 		result.addWarning("MISSING_README", "", "README.md is recommended")
+		_ = readmeFile
+	} else {
+		result.Readme = string(readmeFile.Content)
 	}
-
+	if result.Readme == "" {
+		if skillFile, ok := findByBase(byPath, "SKILL.md"); ok {
+			result.Readme = string(skillFile.Content)
+		}
+	}
 	manifestFile, hasManifest := findByBase(byPath, "skill.yaml")
 	versionFile, hasVersion := findByBase(byPath, "VERSION")
 	changelogFile, hasChangelog := findByBase(byPath, "CHANGELOG.md")
