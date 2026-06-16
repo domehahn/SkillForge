@@ -1,10 +1,10 @@
 module github.com/skillforge/skill-registry
 
-go 1.25
+go 1.25.0
 
 require (
 	github.com/domehahn/sklib v0.0.0
-	github.com/go-chi/chi/v5 v5.0.12
+	github.com/go-chi/chi/v5 v5.2.2
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.22
 	gopkg.in/yaml.v3 v3.0.1
