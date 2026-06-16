@@ -1,0 +1,77 @@
+name: frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skill-registry/web/**'
+      - '.github/workflows/frontend.yml'
+  pull_request:
+    paths:
+      - 'skill-registry/web/**'
+      - '.github/workflows/frontend.yml'
+
+jobs:
+  build-and-lint:
+    name: Build and Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skill-registry/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: skill-registry/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for outdated dependencies
+        run: npm outdated || true
+
+      - name: Build
+        run: npm run build
+
+      - name: Check bundle size
+        run: |
+          du -sh dist/
+          du -sh dist/assets/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: skill-registry/web/dist/
+          retention-days: 7
+
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: skill-registry/web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: skill-registry/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check (if configured)
+        run: |
+          if grep -q '"tsc"' package.json; then
+            npm run tsc || npx tsc --noEmit
+          else
+            echo "No TypeScript type checking configured, skipping"
+          fi

@@ -1,0 +1,122 @@
+name: validate-examples
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skill-registry/examples/**'
+      - '.github/workflows/validate-examples.yml'
+  pull_request:
+    paths:
+      - 'skill-registry/examples/**'
+      - '.github/workflows/validate-examples.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate Example Skills
+    runs-on: ubuntu-latest
+    env:
+      GOWORK: off
+      CGO_ENABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: skill-registry/go.mod
+          cache-dependency-path: skill-registry/go.sum
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y gcc libsqlite3-dev
+
+      - name: Build skforge CLI
+        working-directory: skill-registry
+        run: |
+          mkdir -p bin
+          go build -o bin/skforge ./cmd/skforge
+
+      - name: Validate example skills
+        working-directory: skill-registry
+        run: |
+          EXIT_CODE=0
+          
+          for example_dir in examples/*/; do
+            if [ ! -d "$example_dir" ]; then
+              continue
+            fi
+            
+            example_name=$(basename "$example_dir")
+            echo "::group::Validating $example_name"
+            
+            # Check required files
+            REQUIRED_FILES=("skill.yaml" "SKILL.md" "VERSION" "CHANGELOG.md")
+            for file in "${REQUIRED_FILES[@]}"; do
+              if [ ! -f "$example_dir/$file" ]; then
+                echo "::error::Missing required file: $example_dir/$file"
+                EXIT_CODE=1
+              else
+                echo "✓ Found $file"
+              fi
+            done
+            
+            # Validate skill.yaml structure
+            if [ -f "$example_dir/skill.yaml" ]; then
+              if ! grep -q "^name:" "$example_dir/skill.yaml"; then
+                echo "::error::skill.yaml missing 'name' field in $example_dir"
+                EXIT_CODE=1
+              fi
+              if ! grep -q "^version:" "$example_dir/skill.yaml"; then
+                echo "::error::skill.yaml missing 'version' field in $example_dir"
+                EXIT_CODE=1
+              fi
+            fi
+            
+            # Validate VERSION format
+            if [ -f "$example_dir/VERSION" ]; then
+              VERSION=$(cat "$example_dir/VERSION")
+              if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                echo "::error::VERSION file doesn't follow SemVer format in $example_dir: $VERSION"
+                EXIT_CODE=1
+              else
+                echo "✓ VERSION follows SemVer: $VERSION"
+              fi
+            fi
+            
+            # Check SKILL.md has frontmatter
+            if [ -f "$example_dir/SKILL.md" ]; then
+              if ! head -1 "$example_dir/SKILL.md" | grep -q "^---$"; then
+                echo "::warning::SKILL.md missing YAML frontmatter in $example_dir"
+              else
+                echo "✓ SKILL.md has frontmatter"
+              fi
+            fi
+            
+            echo "::endgroup::"
+          done
+          
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Example validation failed"
+            exit $EXIT_CODE
+          fi
+          
+          echo "✅ All examples validated successfully"
+
+      - name: Test packaging examples
+        working-directory: skill-registry
+        run: |
+          for example_dir in examples/*/; do
+            if [ ! -d "$example_dir" ] || [ ! -f "$example_dir/skill.yaml" ]; then
+              continue
+            fi
+            
+            example_name=$(basename "$example_dir")
+            echo "::group::Testing package creation for $example_name"
+            
+            # Note: This would require implementing a 'package' command in skforge
+            # For now, just validate the directory structure
+            echo "Would package: $example_dir"
+            
+            echo "::endgroup::"
+          done

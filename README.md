@@ -1,5 +1,10 @@
 # SkillForge
 
+[![CI](https://github.com/YOUR_ORG/SkillForge/workflows/skill-registry/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/skill-registry.yml)
+[![Frontend](https://github.com/YOUR_ORG/SkillForge/workflows/frontend/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/frontend.yml)
+[![Integration Tests](https://github.com/YOUR_ORG/SkillForge/workflows/integration-tests/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/integration-tests.yml)
+[![CodeQL](https://github.com/YOUR_ORG/SkillForge/workflows/codeql/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/codeql.yml)
+
 SkillForge is a self-hosted registry server for immutable AI Agent Skill artifacts.
 
 Use `skcr` to scaffold and render local agent/project structures.

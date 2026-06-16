@@ -1,0 +1,128 @@
+name: openapi
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skill-registry/internal/api/openapi.yaml'
+      - 'skill-registry/openapi/**'
+      - '.github/workflows/openapi.yml'
+  pull_request:
+    paths:
+      - 'skill-registry/internal/api/openapi.yaml'
+      - 'skill-registry/openapi/**'
+      - '.github/workflows/openapi.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate OpenAPI Spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenAPI validator
+        run: npm install -g @redocly/cli
+
+      - name: Lint OpenAPI spec
+        run: |
+          if [ -f skill-registry/internal/api/openapi.yaml ]; then
+            redocly lint skill-registry/internal/api/openapi.yaml
+          fi
+          if [ -f skill-registry/openapi/openapi.yaml ]; then
+            redocly lint skill-registry/openapi/openapi.yaml
+          fi
+
+      - name: Bundle OpenAPI spec
+        run: |
+          if [ -f skill-registry/openapi/openapi.yaml ]; then
+            redocly bundle skill-registry/openapi/openapi.yaml -o openapi-bundled.yaml
+          elif [ -f skill-registry/internal/api/openapi.yaml ]; then
+            redocly bundle skill-registry/internal/api/openapi.yaml -o openapi-bundled.yaml
+          fi
+
+      - name: Upload bundled spec
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: openapi-bundled.yaml
+          retention-days: 30
+
+  generate-docs:
+    name: Generate API Docs
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bundled spec
+        uses: actions/download-artifact@v4
+        with:
+          name: openapi-spec
+
+      - name: Generate ReDoc documentation
+        run: |
+          npm install -g @redocly/cli
+          redocly build-docs openapi-bundled.yaml -o api-docs.html
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-documentation
+          path: api-docs.html
+          retention-days: 90
+
+      - name: Deploy to GitHub Pages (optional)
+        if: false  # Enable if you want to deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          publish_branch: gh-pages
+          destination_dir: api-docs
+
+  breaking-changes:
+    name: Check for Breaking Changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        run: npm install -g @redocly/cli oasdiff
+
+      - name: Check for breaking changes
+        run: |
+          # Find the OpenAPI spec file
+          SPEC_FILE=""
+          if [ -f skill-registry/openapi/openapi.yaml ]; then
+            SPEC_FILE="skill-registry/openapi/openapi.yaml"
+          elif [ -f skill-registry/internal/api/openapi.yaml ]; then
+            SPEC_FILE="skill-registry/internal/api/openapi.yaml"
+          else
+            echo "No OpenAPI spec found, skipping"
+            exit 0
+          fi
+
+          # Get the base branch version
+          git fetch origin ${{ github.base_ref }}
+          
+          if git show origin/${{ github.base_ref }}:$SPEC_FILE > base-spec.yaml 2>/dev/null; then
+            echo "Checking for breaking changes..."
+            
+            # Use oasdiff to detect breaking changes
+            if npx oasdiff breaking base-spec.yaml $SPEC_FILE; then
+              echo "✅ No breaking changes detected"
+            else
+              echo "::warning::Breaking changes detected in OpenAPI spec"
+              echo "::warning::This may require a major version bump"
+            fi
+          else
+            echo "No previous spec found, skipping comparison"
+          fi
