@@ -62,6 +62,9 @@ jobs:
       - name: Start skill-registry server
         working-directory: skill-registry
         run: |
+          # Create data directories
+          mkdir -p test-data
+          
           # Create minimal config for testing
           cat > test-config.yaml <<EOF
           server:
