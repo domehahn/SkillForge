@@ -22,23 +22,30 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: SkillForge
+
+      - uses: actions/checkout@v4
+        with:
+          repository: domehahn/sklib
+          path: sklib
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: skill-registry/go.mod
-          cache-dependency-path: skill-registry/go.sum
+          go-version-file: SkillForge/skill-registry/go.mod
+          cache-dependency-path: SkillForge/skill-registry/go.sum
 
       - name: Install system dependencies
         run: sudo apt-get install -y gcc libsqlite3-dev
 
       - name: Build skforge CLI
-        working-directory: skill-registry
+        working-directory: SkillForge/skill-registry
         run: |
           mkdir -p bin
           go build -o bin/skforge ./cmd/skforge
 
       - name: Validate example skills
-        working-directory: skill-registry
+        working-directory: SkillForge/skill-registry
         run: |
           EXIT_CODE=0
           
