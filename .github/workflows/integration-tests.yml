@@ -27,12 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout sklib dependency
-        uses: actions/checkout@v4
-        with:
-          repository: domehahn/sklib
-          path: sklib
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: skill-registry/go.mod
