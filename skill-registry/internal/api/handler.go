@@ -209,6 +209,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware("delete"))
 			r.Delete("/skills/{namespace}/{name}/versions/{version}", h.DeleteVersion)
+			r.Delete("/artifacts/{kind}/{namespace}/{name}/versions/{version}", h.DeleteArtifactVersion)
 		})
 
 		// Admin-only endpoints
