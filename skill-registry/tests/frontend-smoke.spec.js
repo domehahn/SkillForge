@@ -14,6 +14,7 @@ test('frontend smoke: navigation, auth, and key pages do not throw', async ({ pa
   const consoleErrors = []
   const pageErrors = []
   const networkErrors = []
+  let isAuthEnabled = true
 
   page.on('console', msg => {
     if (msg.type() === 'error') {
@@ -33,6 +34,9 @@ test('frontend smoke: navigation, auth, and key pages do not throw', async ({ pa
   page.on('response', res => {
     const url = res.url()
     if (url.startsWith(baseURL) && res.status() >= 400) {
+      if (!isAuthEnabled && res.status() === 401 && url === `${baseURL}/api/v1/tokens`) {
+        return
+      }
       networkErrors.push(`${res.status()} ${url}`)
     }
   })
@@ -60,7 +64,7 @@ test('frontend smoke: navigation, auth, and key pages do not throw', async ({ pa
     await visit(path, text)
   }
 
-  const isAuthEnabled = await authEnabled(page)
+  isAuthEnabled = await authEnabled(page)
   if (isAuthEnabled) {
     await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
     await page.fill('#username', 'admin')

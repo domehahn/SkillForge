@@ -748,16 +748,6 @@ func (h *Handler) AtomFeed(w http.ResponseWriter, r *http.Request) {
 			Name string `xml:"name"`
 		} `xml:"author"`
 	}
-	type atomFeed struct {
-		XMLName xml.Name    `xml:"feed"`
-		Xmlns   string      `xml:"xmlns,attr"`
-		Title   string      `xml:"title"`
-		Link    string      `xml:"link"`
-		SelfURL string      `xml:"-"`
-		ID      string      `xml:"id"`
-		Updated string      `xml:"updated"`
-		Entries []atomEntry `xml:"entry"`
-	}
 
 	updated := ""
 	entries := make([]atomEntry, 0, len(artifacts))

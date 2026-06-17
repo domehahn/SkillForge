@@ -267,7 +267,7 @@ func writeZip(entries []fileEntry) ([]byte, error) {
 	for _, e := range entries {
 		header := &zip.FileHeader{Name: e.Rel, Method: zip.Deflate}
 		header.SetMode(os.FileMode(e.Mode))
-		header.SetModTime(time.Unix(0, 0).UTC())
+		header.Modified = time.Unix(0, 0).UTC()
 		w, err := zw.CreateHeader(header)
 		if err != nil {
 			return nil, err
