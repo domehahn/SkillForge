@@ -2,6 +2,14 @@ import { test, expect } from '@playwright/test'
 
 const baseURL = process.env.SKILLFORGE_E2E_BASE_URL || 'http://localhost:8082'
 
+async function authEnabled(page) {
+  const res = await page.request.get(`${baseURL}/api/v1/capabilities`)
+  expect(res.status()).toBeLessThan(500)
+  if (!res.ok()) return true
+  const capabilities = await res.json()
+  return capabilities.auth_enabled !== false
+}
+
 test('frontend smoke: navigation, auth, and key pages do not throw', async ({ page }) => {
   const consoleErrors = []
   const pageErrors = []
@@ -52,11 +60,20 @@ test('frontend smoke: navigation, auth, and key pages do not throw', async ({ pa
     await visit(path, text)
   }
 
-  await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
-  await page.fill('#username', 'admin')
-  await page.fill('#password', 'changeme')
-  await page.getByRole('button', { name: /sign in/i }).click()
-  await expect(page).not.toHaveURL(/\/login$/, { timeout: 10000 })
+  if (await authEnabled(page)) {
+    await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
+    await page.fill('#username', 'admin')
+    await page.fill('#password', 'changeme')
+    await page.getByRole('button', { name: /sign in/i }).click()
+    await expect(page).not.toHaveURL(/\/login$/, { timeout: 10000 })
+  } else {
+    await page.goto(`${baseURL}/`, { waitUntil: 'domcontentloaded' })
+    await page.evaluate(() => {
+      localStorage.setItem('sf_token', 'e2e-auth-disabled')
+      localStorage.setItem('sf_user', 'admin')
+      localStorage.setItem('sf_role', 'admin')
+    })
+  }
   await expect.poll(() => page.evaluate(() => localStorage.getItem('sf_token'))).toBeTruthy()
 
   const authenticatedPages = [

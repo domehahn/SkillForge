@@ -169,14 +169,25 @@ async function json(response, label) {
   return response.json()
 }
 
+async function authHeaders(request) {
+  const capabilitiesResp = await request.get(`${baseURL}/api/v1/capabilities`)
+  if (capabilitiesResp.ok()) {
+    const capabilities = await capabilitiesResp.json()
+    if (capabilities.auth_enabled === false) {
+      return { Authorization: 'Bearer e2e-auth-disabled' }
+    }
+  }
+
+  const login = await json(await request.post(`${baseURL}/api/v1/auth/login`, {
+    data: { username: 'admin', password: 'changeme' },
+  }), 'login')
+  return { Authorization: `Bearer ${login.token}` }
+}
+
 test('registry lifecycle: publish, download, update metadata, tag, comment, collect, attest, and delete', async ({ request }) => {
   const stamp = Date.now().toString(36)
   const namespace = `e2e-${stamp}`
-  const headers = {
-    Authorization: `Bearer ${(await json(await request.post(`${baseURL}/api/v1/auth/login`, {
-      data: { username: 'admin', password: 'changeme' },
-    }), 'login')).token}`,
-  }
+  const headers = await authHeaders(request)
 
   const kinds = ['skill', 'agent', 'prompt', 'mcp', 'tool', 'bundle']
   for (const kind of kinds) {
