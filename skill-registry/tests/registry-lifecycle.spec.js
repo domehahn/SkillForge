@@ -174,20 +174,27 @@ async function authHeaders(request) {
   if (capabilitiesResp.ok()) {
     const capabilities = await capabilitiesResp.json()
     if (capabilities.auth_enabled === false) {
-      return { Authorization: 'Bearer e2e-auth-disabled' }
+      return {
+        headers: { Authorization: 'Bearer e2e-auth-disabled' },
+        user: 'anonymous',
+      }
     }
   }
 
   const login = await json(await request.post(`${baseURL}/api/v1/auth/login`, {
     data: { username: 'admin', password: 'changeme' },
   }), 'login')
-  return { Authorization: `Bearer ${login.token}` }
+  return {
+    headers: { Authorization: `Bearer ${login.token}` },
+    user: login.user || 'admin',
+  }
 }
 
 test('registry lifecycle: publish, download, update metadata, tag, comment, collect, attest, and delete', async ({ request }) => {
   const stamp = Date.now().toString(36)
   const namespace = `e2e-${stamp}`
-  const headers = await authHeaders(request)
+  const auth = await authHeaders(request)
+  const headers = auth.headers
 
   const kinds = ['skill', 'agent', 'prompt', 'mcp', 'tool', 'bundle']
   for (const kind of kinds) {
@@ -275,7 +282,7 @@ test('registry lifecycle: publish, download, update metadata, tag, comment, coll
     headers,
     data: { name: `Lifecycle ${stamp}`, description: 'Lifecycle collection', visibility: 'public' },
   }), 'create collection')
-  const collectionWithArtifact = await json(await request.put(`${baseURL}/api/v1/namespaces/admin/collections/${collection.slug}`, {
+  const collectionWithArtifact = await json(await request.put(`${baseURL}/api/v1/namespaces/${auth.user}/collections/${collection.slug}`, {
     headers,
     data: {
       name: collection.name,
@@ -285,7 +292,7 @@ test('registry lifecycle: publish, download, update metadata, tag, comment, coll
     },
   }), 'update collection')
   expect(collectionWithArtifact.artifacts).toEqual([{ kind: 'prompt', namespace, name: promptName }])
-  await ok(await request.delete(`${baseURL}/api/v1/namespaces/admin/collections/${collection.slug}`, { headers }), 'delete collection')
+  await ok(await request.delete(`${baseURL}/api/v1/namespaces/${auth.user}/collections/${collection.slug}`, { headers }), 'delete collection')
 
   for (const kind of kinds) {
     const name = `${kind}-${stamp}`

@@ -60,7 +60,8 @@ test('frontend smoke: navigation, auth, and key pages do not throw', async ({ pa
     await visit(path, text)
   }
 
-  if (await authEnabled(page)) {
+  const isAuthEnabled = await authEnabled(page)
+  if (isAuthEnabled) {
     await page.goto(`${baseURL}/login`, { waitUntil: 'domcontentloaded' })
     await page.fill('#username', 'admin')
     await page.fill('#password', 'changeme')
@@ -89,7 +90,7 @@ test('frontend smoke: navigation, auth, and key pages do not throw', async ({ pa
     ['/namespace/admin/webhooks', 'Webhooks'],
     ['/namespace/admin/insights', 'Insights'],
     ['/namespace/admin/collections', 'Collections'],
-  ]
+  ].filter(([path]) => isAuthEnabled || path !== '/account/tokens')
   for (const [path, text] of authenticatedPages) {
     await visit(path, text)
   }
