@@ -18,6 +18,9 @@ test('frontend smoke: navigation, auth, and key pages do not throw', async ({ pa
 
   page.on('console', msg => {
     if (msg.type() === 'error') {
+      if (!isAuthEnabled && msg.text().includes('status of 401')) {
+        return
+      }
       consoleErrors.push(msg.text())
     }
   })

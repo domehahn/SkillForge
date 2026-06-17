@@ -64,7 +64,7 @@ jobs:
       - name: Build Docker image
         run: |
           docker build \
-            --file SkillForge/skill-registry/Dockerfile \
+            --file skill-registry/Dockerfile \
             --tag skill-registry:ci \
             .
 

@@ -42,7 +42,7 @@ run: build
 
 docker-build:
 	@echo "Building Docker image..."
-	docker build -t skill-registry:latest -f SkillForge/skill-registry/Dockerfile ../..
+	docker build -t skill-registry:latest -f Dockerfile ..
 	@echo "Docker build complete!"
 
 compose-up:
