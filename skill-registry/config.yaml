@@ -27,6 +27,14 @@ security:
   hsts_max_age_seconds: 31536000
   openapi_cors_origin: "https://registry.skillforge.local"
   content_security_policy: "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self'"
+  # CIDR ranges of reverse proxies whose X-Forwarded-For header is trusted
+  # for client IP resolution (audit logging, rate limiting). Required when
+  # running behind a load balancer/reverse proxy — otherwise every request
+  # not from one of these ranges has X-Forwarded-For ignored entirely, and
+  # a client cannot spoof its audit-logged or rate-limited identity by
+  # setting the header itself. Example for a proxy on the same host:
+  #   trusted_proxies: ["127.0.0.1/32"]
+  trusted_proxies: []
 
 email:
   smtp_enabled: true
