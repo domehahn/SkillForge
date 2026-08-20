@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
 	"github.com/skillforge/skill-registry/internal/api"
 	"github.com/skillforge/skill-registry/internal/audit"
 	"github.com/skillforge/skill-registry/internal/auth"
@@ -136,7 +137,11 @@ func main() {
 		r.Use(observability.SecurityHeadersMiddleware(cfg.Security))
 	}
 	if cfg.RateLimit.Enabled {
-		limiter := ratelimit.New(cfg.RateLimit.RequestsPerMinute, time.Minute, cfg.Security.TrustedProxies)
+		backend, err := newRateLimitBackend(cfg)
+		if err != nil {
+			log.Fatalf("Failed to initialize rate limiter: %v", err)
+		}
+		limiter := ratelimit.New(backend, cfg.Security.TrustedProxies, logger)
 		r.Use(ratelimit.Middleware(limiter))
 	}
 
@@ -391,6 +396,27 @@ func databaseDSN(cfg *config.Config) string {
 		return cfg.Database.DSN
 	}
 	return cfg.Database.Path
+}
+
+// newRateLimitBackend constructs the ratelimit.Backend selected by
+// cfg.RateLimit.Backend. Kept here for the same layering reason as
+// newStorageBackend below.
+func newRateLimitBackend(cfg *config.Config) (ratelimit.Backend, error) {
+	window := time.Minute
+	switch cfg.RateLimit.Backend {
+	case "", "memory":
+		return ratelimit.NewMemoryBackend(cfg.RateLimit.RequestsPerMinute, window), nil
+	case "redis":
+		client := redis.NewClient(&redis.Options{
+			Addr:     cfg.RateLimit.Redis.Addr,
+			Password: cfg.RateLimit.Redis.Password,
+			DB:       cfg.RateLimit.Redis.DB,
+		})
+		return ratelimit.NewRedisBackend(client, cfg.RateLimit.RequestsPerMinute, window, cfg.RateLimit.Redis.KeyPrefix), nil
+	default:
+		// cfg.Validate() should have already rejected this.
+		return nil, fmt.Errorf("unknown rate_limit.backend %q", cfg.RateLimit.Backend)
+	}
 }
 
 // newStorageBackend constructs the storage.Backend selected by

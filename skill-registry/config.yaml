@@ -76,6 +76,22 @@ proxy:
   enabled: false
   upstreams: []
 
+rate_limit:
+  enabled: true
+  requests_per_minute: 300
+  # "memory" (default) counts per-instance — each replica behind a load
+  # balancer gets its own independent budget, so a client effectively gets
+  # (num_replicas × requests_per_minute). "redis" shares one counter across
+  # every replica pointed at the same Redis instance, which is required
+  # for the limit to actually hold once more than one registry instance is
+  # running.
+  backend: "memory"
+  redis:
+    addr: "" # e.g. "localhost:6379"; only read when backend is "redis"
+    password: ""
+    db: 0
+    key_prefix: "skillforge:ratelimit:"
+
 validation:
   blocked_extensions:
     - ".exe"
