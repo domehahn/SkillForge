@@ -1,18 +1,19 @@
 package ratelimit
 
 import (
-	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/skillforge/skill-registry/internal/clientip"
 )
 
 type Limiter struct {
-	mu      sync.Mutex
-	buckets map[string]*bucket
-	rate    int
-	window  time.Duration
+	mu        sync.Mutex
+	buckets   map[string]*bucket
+	rate      int
+	window    time.Duration
+	clientIPs *clientip.Resolver
 }
 
 type bucket struct {
@@ -20,11 +21,17 @@ type bucket struct {
 	windowEnd time.Time
 }
 
-func New(rate int, window time.Duration) *Limiter {
+// New builds a Limiter. trustedProxyCIDRs (config.Config.Security.
+// TrustedProxies) controls whether X-Forwarded-For is honored when
+// deriving the per-IP bucket key — see internal/clientip's package doc for
+// why an unconditionally-trusted X-Forwarded-For lets any client bypass
+// rate limiting by sending a fresh header value per request.
+func New(rate int, window time.Duration, trustedProxyCIDRs []string) *Limiter {
 	l := &Limiter{
-		buckets: make(map[string]*bucket),
-		rate:    rate,
-		window:  window,
+		buckets:   make(map[string]*bucket),
+		rate:      rate,
+		window:    window,
+		clientIPs: clientip.NewResolver(trustedProxyCIDRs),
 	}
 	go l.cleanup()
 	return l
@@ -66,7 +73,7 @@ func (l *Limiter) cleanup() {
 func Middleware(l *Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !l.Allow(clientKey(r)) {
+			if !l.Allow(l.clientKey(r)) {
 				w.Header().Set("Retry-After", "60")
 				w.Header().Set("Content-Type", "application/json")
 				http.Error(w, `{"error":"rate limit exceeded","code":"RATE_LIMITED"}`, http.StatusTooManyRequests)
@@ -77,20 +84,9 @@ func Middleware(l *Limiter) func(http.Handler) http.Handler {
 	}
 }
 
-func clientKey(r *http.Request) string {
+func (l *Limiter) clientKey(r *http.Request) string {
 	if auth := r.Header.Get("Authorization"); len(auth) > 12 {
 		return "tok:" + auth[len(auth)-12:]
 	}
-	return "ip:" + clientIP(r)
-}
-
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return "ip:" + l.clientIPs.Resolve(r)
 }

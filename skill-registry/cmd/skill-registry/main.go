@@ -136,7 +136,7 @@ func main() {
 		r.Use(observability.SecurityHeadersMiddleware(cfg.Security))
 	}
 	if cfg.RateLimit.Enabled {
-		limiter := ratelimit.New(cfg.RateLimit.RequestsPerMinute, time.Minute)
+		limiter := ratelimit.New(cfg.RateLimit.RequestsPerMinute, time.Minute, cfg.Security.TrustedProxies)
 		r.Use(ratelimit.Middleware(limiter))
 	}
 

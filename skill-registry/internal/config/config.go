@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -52,6 +53,18 @@ type SecurityConfig struct {
 	HSTSEnabled           bool   `yaml:"hsts_enabled"`
 	HSTSMaxAgeSeconds     int    `yaml:"hsts_max_age_seconds"`
 	OpenAPICORSOrigin     string `yaml:"openapi_cors_origin"`
+	// TrustedProxies lists CIDR ranges (e.g. "10.0.0.0/8", "127.0.0.1/32")
+	// whose X-Forwarded-For header is honored for client IP resolution
+	// (audit logging, rate limiting). A request whose immediate peer
+	// (RemoteAddr) is NOT in this list has its X-Forwarded-For header
+	// ignored entirely — the peer's own address is used instead. Empty by
+	// default: with no trusted proxies configured, X-Forwarded-For is never
+	// honored, which is the safe default for a directly-exposed server.
+	// Deploying behind a reverse proxy that sets X-Forwarded-For requires
+	// listing that proxy's address here, or every client can spoof its
+	// audit-logged and rate-limited identity by just setting the header
+	// itself.
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // StorageConfig holds storage configuration
@@ -248,6 +261,15 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SKILL_REGISTRY_OPENAPI_CORS_ORIGIN"); v != "" {
 		cfg.Security.OpenAPICORSOrigin = v
 	}
+	if v := os.Getenv("SKILL_REGISTRY_TRUSTED_PROXIES"); v != "" {
+		var proxies []string
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				proxies = append(proxies, p)
+			}
+		}
+		cfg.Security.TrustedProxies = proxies
+	}
 	if v := os.Getenv("SKILL_REGISTRY_EMAIL_SMTP_ENABLED"); v != "" {
 		cfg.Email.SMTPEnabled = strings.ToLower(v) == "true" || v == "1"
 	}
@@ -329,6 +351,11 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.Security.HSTSMaxAgeSeconds < 0 {
 		return fmt.Errorf("security.hsts_max_age_seconds must be >= 0")
+	}
+	for _, cidr := range cfg.Security.TrustedProxies {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("security.trusted_proxies: invalid CIDR %q: %w", cidr, err)
+		}
 	}
 	if cfg.Auth.RequireEmailVerification && cfg.Email.SMTPEnabled && cfg.Email.SMTPHost == "" {
 		return fmt.Errorf("email.smtp_host is required when SMTP email verification is enabled")
