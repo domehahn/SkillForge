@@ -88,7 +88,9 @@ rate_limit:
   backend: "memory"
   redis:
     addr: "" # e.g. "localhost:6379"; only read when backend is "redis"
-    password: ""
+    # password is intentionally not shown here — set it via the
+    # SKILL_REGISTRY_REDIS_PASSWORD env var instead of committing it to
+    # this file.
     db: 0
     key_prefix: "skillforge:ratelimit:"
 
