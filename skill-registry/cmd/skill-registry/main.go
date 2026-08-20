@@ -60,7 +60,7 @@ func main() {
 	defer repo.Close()
 
 	// Initialize storage
-	store, err := storage.NewStorage(cfg.Storage.DataDir)
+	store, err := newStorageBackend(context.Background(), cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
@@ -391,6 +391,32 @@ func databaseDSN(cfg *config.Config) string {
 		return cfg.Database.DSN
 	}
 	return cfg.Database.Path
+}
+
+// newStorageBackend constructs the storage.Backend selected by
+// cfg.Storage.Backend. Kept here rather than in internal/storage itself so
+// that package doesn't need to import internal/config — config describes
+// the app's settings, storage shouldn't need to know the whole app's
+// config shape just to pick a backend.
+func newStorageBackend(ctx context.Context, cfg *config.Config) (storage.Backend, error) {
+	switch cfg.Storage.Backend {
+	case "", "filesystem":
+		return storage.NewStorage(cfg.Storage.DataDir)
+	case "s3":
+		return storage.NewS3Storage(ctx,
+			cfg.Storage.S3.Endpoint,
+			cfg.Storage.S3.Region,
+			cfg.Storage.S3.Bucket,
+			cfg.Storage.S3.AccessKey,
+			cfg.Storage.S3.SecretKey,
+			cfg.Storage.S3.UseSSL,
+			cfg.Storage.S3.PathStyle,
+		)
+	default:
+		// cfg.Validate() should have already rejected this, but don't
+		// silently fall back to filesystem if it somehow wasn't called.
+		return nil, fmt.Errorf("unknown storage.backend %q", cfg.Storage.Backend)
+	}
 }
 
 func backupCommand() {
