@@ -39,6 +39,24 @@ type TLSConfig struct {
 type RateLimitConfig struct {
 	Enabled           bool `yaml:"enabled"`
 	RequestsPerMinute int  `yaml:"requests_per_minute"`
+	// Backend selects the counting strategy: "memory" (default — a single
+	// instance's own counters, not shared with other replicas) or "redis"
+	// (shared across every replica pointed at the same Redis instance —
+	// required for the limit to actually hold once more than one registry
+	// instance is running behind a load balancer).
+	Backend string      `yaml:"backend"`
+	Redis   RedisConfig `yaml:"redis"`
+}
+
+// RedisConfig configures the Redis-backed rate limiter. Only read when
+// rate_limit.backend is "redis".
+type RedisConfig struct {
+	Addr     string `yaml:"addr"` // e.g. "localhost:6379"
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
+	// KeyPrefix namespaces this limiter's keys, useful if the same Redis
+	// instance is shared with other data.
+	KeyPrefix string `yaml:"key_prefix"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -209,6 +227,7 @@ func DefaultConfig() *Config {
 		RateLimit: RateLimitConfig{
 			Enabled:           true,
 			RequestsPerMinute: 300,
+			Backend:           "memory",
 		},
 	}
 }
@@ -308,6 +327,15 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("SKILL_REGISTRY_OPENAPI_CORS_ORIGIN"); v != "" {
 		cfg.Security.OpenAPICORSOrigin = v
 	}
+	if v := os.Getenv("SKILL_REGISTRY_RATE_LIMIT_BACKEND"); v != "" {
+		cfg.RateLimit.Backend = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_REDIS_ADDR"); v != "" {
+		cfg.RateLimit.Redis.Addr = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_REDIS_PASSWORD"); v != "" {
+		cfg.RateLimit.Redis.Password = v
+	}
 	if v := os.Getenv("SKILL_REGISTRY_TRUSTED_PROXIES"); v != "" {
 		var proxies []string
 		for _, p := range strings.Split(v, ",") {
@@ -406,6 +434,15 @@ func (cfg *Config) Validate() error {
 		if cfg.Storage.S3.Endpoint == "" {
 			return fmt.Errorf("storage.s3.endpoint is required when storage.backend is \"s3\"")
 		}
+	}
+	if cfg.RateLimit.Backend == "" {
+		cfg.RateLimit.Backend = "memory"
+	}
+	if cfg.RateLimit.Backend != "memory" && cfg.RateLimit.Backend != "redis" {
+		return fmt.Errorf("rate_limit.backend must be \"memory\" or \"redis\", got %q", cfg.RateLimit.Backend)
+	}
+	if cfg.RateLimit.Enabled && cfg.RateLimit.Backend == "redis" && cfg.RateLimit.Redis.Addr == "" {
+		return fmt.Errorf("rate_limit.redis.addr is required when rate_limit.backend is \"redis\"")
 	}
 	if cfg.Auth.BcryptCost < 4 || cfg.Auth.BcryptCost > 31 {
 		return fmt.Errorf("auth.bcrypt_cost must be between 4 and 31")
