@@ -60,6 +60,7 @@ func (c rebindConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.
 	if b, ok := c.Conn.(driver.ConnBeginTx); ok {
 		return b.BeginTx(ctx, opts)
 	}
+	//lint:ignore SA1019 database/sql still requires Begin for legacy drivers without ConnBeginTx.
 	return c.Conn.Begin()
 }
 

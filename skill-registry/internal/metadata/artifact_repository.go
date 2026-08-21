@@ -22,7 +22,7 @@ func (r *Repository) CreateArtifact(ctx context.Context, artifact *Artifact) err
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(kind, namespace, name) DO UPDATE SET
 			description = excluded.description,
-			readme = CASE WHEN excluded.readme != '' THEN excluded.readme ELSE readme END,
+			readme = CASE WHEN excluded.readme != '' THEN excluded.readme ELSE artifacts.readme END,
 			visibility = excluded.visibility,
 			tags = excluded.tags, owners = excluded.owners, updated_at = excluded.updated_at
 		RETURNING id
@@ -234,6 +234,80 @@ func (r *Repository) ListArtifactVersions(ctx context.Context, artifactID int64)
 		versions = append(versions, *v)
 	}
 	return versions, nil
+}
+
+func (r *Repository) DeleteArtifactVersion(ctx context.Context, kind, namespace, name, version string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var artifactID, versionID int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT id FROM artifacts WHERE kind = ? AND namespace = ? AND name = ?
+	`, kind, namespace, name).Scan(&artifactID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("artifact not found")
+		}
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `
+		SELECT id FROM artifact_versions WHERE artifact_id = ? AND version = ?
+	`, artifactID, version).Scan(&versionID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("artifact version not found")
+		}
+		return err
+	}
+
+	for _, stmt := range []string{
+		`DELETE FROM attestations WHERE artifact_version_id = ?`,
+		`DELETE FROM scan_results WHERE artifact_version_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, versionID); err != nil {
+			return err
+		}
+	}
+	for _, stmt := range []string{
+		`DELETE FROM artifact_dist_tags WHERE artifact_id = ? AND version = ?`,
+		`DELETE FROM artifact_download_counts WHERE artifact_id = ? AND version = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt, artifactID, version); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM promotions WHERE kind = ? AND namespace = ? AND name = ? AND version = ?`, kind, namespace, name, version); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM artifact_versions WHERE id = ?`, versionID); err != nil {
+		return err
+	}
+
+	var latest sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT version FROM artifact_versions
+		WHERE artifact_id = ?
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, artifactID).Scan(&latest); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	nextLatest := ""
+	if latest.Valid {
+		nextLatest = latest.String
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO artifact_dist_tags (artifact_id, tag, version, updated_at, updated_by)
+			VALUES (?, 'latest', ?, ?, '')
+			ON CONFLICT(artifact_id, tag) DO UPDATE SET version = excluded.version, updated_at = excluded.updated_at
+		`, artifactID, nextLatest, time.Now()); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE artifacts SET latest_version = ?, updated_at = ? WHERE id = ?`, nextLatest, time.Now(), artifactID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) SetArtifactDistTag(ctx context.Context, artifactID int64, tag, version, actor string) error {

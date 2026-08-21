@@ -172,7 +172,10 @@ func (r *Registry) ResolveArtifactVersion(ctx context.Context, kind, namespace, 
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(versions, func(i, j int) bool { cmp, _ := spec.CompareVersionsSafe(versions[i].Version, versions[j].Version); return cmp > 0 })
+	sort.Slice(versions, func(i, j int) bool {
+		cmp, _ := spec.CompareVersionsSafe(versions[i].Version, versions[j].Version)
+		return cmp > 0
+	})
 	for i := range versions {
 		if semverMatches(versions[i].Version, ref) {
 			return &versions[i], nil
@@ -192,6 +195,19 @@ func (r *Registry) DownloadArtifact(ctx context.Context, kind, namespace, name, 
 	}
 	_ = r.repo.IncrementArtifactDownload(ctx, version.ArtifactID, version.Version)
 	return data, version, nil
+}
+
+func (r *Registry) DeleteArtifactVersion(ctx context.Context, kind, namespace, name, version, actor string) error {
+	if err := validation.ValidateArtifactKind(kind); err != nil {
+		return err
+	}
+	if err := r.repo.DeleteArtifactVersion(ctx, kind, namespace, name, version); err != nil {
+		return err
+	}
+	return r.repo.LogAudit(ctx, &metadata.AuditLog{
+		Action: "artifact.delete", Namespace: namespace, Name: name, Version: version,
+		Actor: actor, Success: true, Message: kind,
+	})
 }
 
 func (r *Registry) PromoteArtifact(ctx context.Context, kind, namespace, name, version, channel, actor string) error {

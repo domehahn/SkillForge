@@ -316,7 +316,10 @@ func TestPublishRejectsMissingManifest(t *testing.T) {
 
 	req, _ := http.NewRequest("PUT", srv.url("/api/v1/skills/test/my-skill/versions/1.0.0"), bytes.NewReader(pkg))
 	req.Header.Set("Content-Type", "application/gzip")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("publish request: %v", err)
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {
@@ -343,7 +346,10 @@ func TestPublishRejectsMissingChecksums(t *testing.T) {
 
 	req, _ := http.NewRequest("PUT", srv.url("/api/v1/skills/test/my-skill/versions/1.0.0"), bytes.NewReader(pkg))
 	req.Header.Set("Content-Type", "application/gzip")
-	resp, _ := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("publish request: %v", err)
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusBadRequest {

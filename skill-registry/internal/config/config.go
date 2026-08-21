@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -38,6 +39,24 @@ type TLSConfig struct {
 type RateLimitConfig struct {
 	Enabled           bool `yaml:"enabled"`
 	RequestsPerMinute int  `yaml:"requests_per_minute"`
+	// Backend selects the counting strategy: "memory" (default — a single
+	// instance's own counters, not shared with other replicas) or "redis"
+	// (shared across every replica pointed at the same Redis instance —
+	// required for the limit to actually hold once more than one registry
+	// instance is running behind a load balancer).
+	Backend string      `yaml:"backend"`
+	Redis   RedisConfig `yaml:"redis"`
+}
+
+// RedisConfig configures the Redis-backed rate limiter. Only read when
+// rate_limit.backend is "redis".
+type RedisConfig struct {
+	Addr     string `yaml:"addr"` // e.g. "localhost:6379"
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
+	// KeyPrefix namespaces this limiter's keys, useful if the same Redis
+	// instance is shared with other data.
+	KeyPrefix string `yaml:"key_prefix"`
 }
 
 // ServerConfig holds HTTP server configuration
@@ -52,13 +71,47 @@ type SecurityConfig struct {
 	HSTSEnabled           bool   `yaml:"hsts_enabled"`
 	HSTSMaxAgeSeconds     int    `yaml:"hsts_max_age_seconds"`
 	OpenAPICORSOrigin     string `yaml:"openapi_cors_origin"`
+	// TrustedProxies lists CIDR ranges (e.g. "10.0.0.0/8", "127.0.0.1/32")
+	// whose X-Forwarded-For header is honored for client IP resolution
+	// (audit logging, rate limiting). A request whose immediate peer
+	// (RemoteAddr) is NOT in this list has its X-Forwarded-For header
+	// ignored entirely — the peer's own address is used instead. Empty by
+	// default: with no trusted proxies configured, X-Forwarded-For is never
+	// honored, which is the safe default for a directly-exposed server.
+	// Deploying behind a reverse proxy that sets X-Forwarded-For requires
+	// listing that proxy's address here, or every client can spoof its
+	// audit-logged and rate-limited identity by just setting the header
+	// itself.
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // StorageConfig holds storage configuration
 type StorageConfig struct {
+	// Backend selects the blob storage implementation: "filesystem" (the
+	// default — a local directory, fine for a single node) or "s3" (an
+	// S3-compatible object store, required for running more than one
+	// registry instance against the same artifact set, since a local
+	// filesystem store is not shared across pods/hosts).
+	Backend             string   `yaml:"backend"`
 	DataDir             string   `yaml:"data_dir"`
 	MaxPackageSizeMB    int      `yaml:"max_package_size_mb"`
 	AllowedPackageTypes []string `yaml:"allowed_package_types"`
+	S3                  S3Config `yaml:"s3"`
+}
+
+// S3Config configures the S3-compatible object storage backend. Only read
+// when storage.backend is "s3".
+type S3Config struct {
+	Endpoint  string `yaml:"endpoint"` // e.g. "s3.amazonaws.com" or "minio.internal:9000"
+	Region    string `yaml:"region"`   // e.g. "us-east-1"; some S3-compatible backends ignore this
+	Bucket    string `yaml:"bucket"`
+	AccessKey string `yaml:"access_key"`
+	SecretKey string `yaml:"secret_key"`
+	UseSSL    bool   `yaml:"use_ssl"`
+	// PathStyle forces path-style addressing (https://host/bucket/key)
+	// instead of virtual-hosted-style (https://bucket.host/key) — needed
+	// for most non-AWS S3-compatible backends (MinIO, etc).
+	PathStyle bool `yaml:"path_style"`
 }
 
 // DatabaseConfig holds database configuration
@@ -133,6 +186,7 @@ func DefaultConfig() *Config {
 			OpenAPICORSOrigin:     "*",
 		},
 		Storage: StorageConfig{
+			Backend:             "filesystem",
 			DataDir:             "./data",
 			MaxPackageSizeMB:    50,
 			AllowedPackageTypes: []string{"tgz", "zip"},
@@ -173,6 +227,7 @@ func DefaultConfig() *Config {
 		RateLimit: RateLimitConfig{
 			Enabled:           true,
 			RequestsPerMinute: 300,
+			Backend:           "memory",
 		},
 	}
 }
@@ -208,6 +263,30 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SKILL_REGISTRY_DATA_DIR"); v != "" {
 		cfg.Storage.DataDir = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_STORAGE_BACKEND"); v != "" {
+		cfg.Storage.Backend = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_S3_ENDPOINT"); v != "" {
+		cfg.Storage.S3.Endpoint = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_S3_REGION"); v != "" {
+		cfg.Storage.S3.Region = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_S3_BUCKET"); v != "" {
+		cfg.Storage.S3.Bucket = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_S3_ACCESS_KEY"); v != "" {
+		cfg.Storage.S3.AccessKey = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_S3_SECRET_KEY"); v != "" {
+		cfg.Storage.S3.SecretKey = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_S3_USE_SSL"); v != "" {
+		cfg.Storage.S3.UseSSL = strings.ToLower(v) == "true" || v == "1"
+	}
+	if v := os.Getenv("SKILL_REGISTRY_S3_PATH_STYLE"); v != "" {
+		cfg.Storage.S3.PathStyle = strings.ToLower(v) == "true" || v == "1"
 	}
 	if v := os.Getenv("SKILL_REGISTRY_DB_PATH"); v != "" {
 		cfg.Database.Path = v
@@ -247,6 +326,24 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("SKILL_REGISTRY_OPENAPI_CORS_ORIGIN"); v != "" {
 		cfg.Security.OpenAPICORSOrigin = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_RATE_LIMIT_BACKEND"); v != "" {
+		cfg.RateLimit.Backend = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_REDIS_ADDR"); v != "" {
+		cfg.RateLimit.Redis.Addr = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_REDIS_PASSWORD"); v != "" {
+		cfg.RateLimit.Redis.Password = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_TRUSTED_PROXIES"); v != "" {
+		var proxies []string
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				proxies = append(proxies, p)
+			}
+		}
+		cfg.Security.TrustedProxies = proxies
 	}
 	if v := os.Getenv("SKILL_REGISTRY_EMAIL_SMTP_ENABLED"); v != "" {
 		cfg.Email.SMTPEnabled = strings.ToLower(v) == "true" || v == "1"
@@ -324,11 +421,39 @@ func (cfg *Config) Validate() error {
 	if cfg.Storage.MaxPackageSizeMB <= 0 {
 		return fmt.Errorf("storage.max_package_size_mb must be > 0")
 	}
+	if cfg.Storage.Backend == "" {
+		cfg.Storage.Backend = "filesystem"
+	}
+	if cfg.Storage.Backend != "filesystem" && cfg.Storage.Backend != "s3" {
+		return fmt.Errorf("storage.backend must be \"filesystem\" or \"s3\", got %q", cfg.Storage.Backend)
+	}
+	if cfg.Storage.Backend == "s3" {
+		if cfg.Storage.S3.Bucket == "" {
+			return fmt.Errorf("storage.s3.bucket is required when storage.backend is \"s3\"")
+		}
+		if cfg.Storage.S3.Endpoint == "" {
+			return fmt.Errorf("storage.s3.endpoint is required when storage.backend is \"s3\"")
+		}
+	}
+	if cfg.RateLimit.Backend == "" {
+		cfg.RateLimit.Backend = "memory"
+	}
+	if cfg.RateLimit.Backend != "memory" && cfg.RateLimit.Backend != "redis" {
+		return fmt.Errorf("rate_limit.backend must be \"memory\" or \"redis\", got %q", cfg.RateLimit.Backend)
+	}
+	if cfg.RateLimit.Enabled && cfg.RateLimit.Backend == "redis" && cfg.RateLimit.Redis.Addr == "" {
+		return fmt.Errorf("rate_limit.redis.addr is required when rate_limit.backend is \"redis\"")
+	}
 	if cfg.Auth.BcryptCost < 4 || cfg.Auth.BcryptCost > 31 {
 		return fmt.Errorf("auth.bcrypt_cost must be between 4 and 31")
 	}
 	if cfg.Security.HSTSMaxAgeSeconds < 0 {
 		return fmt.Errorf("security.hsts_max_age_seconds must be >= 0")
+	}
+	for _, cidr := range cfg.Security.TrustedProxies {
+		if _, _, err := net.ParseCIDR(cidr); err != nil {
+			return fmt.Errorf("security.trusted_proxies: invalid CIDR %q: %w", cidr, err)
+		}
 	}
 	if cfg.Auth.RequireEmailVerification && cfg.Email.SMTPEnabled && cfg.Email.SMTPHost == "" {
 		return fmt.Errorf("email.smtp_host is required when SMTP email verification is enabled")

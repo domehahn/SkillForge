@@ -711,11 +711,49 @@ func (r *Repository) ListVersions(ctx context.Context, skillID int64) ([]SkillVe
 	return versions, nil
 }
 
-// DeleteVersion soft-deletes a version
+// DeleteVersion removes a version and any dist-tags pointing at it.
 func (r *Repository) DeleteVersion(ctx context.Context, namespace, name, version string) error {
-	query := `UPDATE skill_versions SET deprecated = 1 WHERE namespace = ? AND name = ? AND version = ?`
-	_, err := r.db.ExecContext(ctx, query, namespace, name, version)
-	return err
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var skillID int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM skills WHERE namespace = ? AND name = ?`, namespace, name).Scan(&skillID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("skill not found")
+		}
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM dist_tags WHERE skill_id = ? AND version = ?`, skillID, version); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM skill_versions WHERE skill_id = ? AND version = ?`, skillID, version)
+	if err != nil {
+		return err
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return fmt.Errorf("version not found")
+	}
+
+	var latest sql.NullString
+	if err := tx.QueryRowContext(ctx, `
+		SELECT version FROM skill_versions
+		WHERE skill_id = ? AND yanked = 0
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, skillID).Scan(&latest); err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	nextLatest := ""
+	if latest.Valid {
+		nextLatest = latest.String
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE skills SET latest_version = ?, updated_at = ? WHERE id = ?`, nextLatest, time.Now(), skillID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *Repository) DeprecateVersion(ctx context.Context, namespace, name, version, reason, actor string) error {
