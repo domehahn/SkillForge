@@ -2,11 +2,28 @@ server:
   addr: ":8080"
 
 storage:
+  # "filesystem" (default) stores blobs in data_dir on this host — fine for
+  # a single instance, but not shared across replicas. "s3" stores blobs in
+  # an S3-compatible bucket instead, which every replica can read/write —
+  # required for running more than one registry instance against the same
+  # artifact set.
+  backend: "filesystem"
   data_dir: "./data"
   max_package_size_mb: 50
   allowed_package_types:
     - tgz
     - zip
+  # Only read when backend is "s3". access_key/secret_key are better set
+  # via SKILL_REGISTRY_S3_ACCESS_KEY / SKILL_REGISTRY_S3_SECRET_KEY env
+  # vars than committed here.
+  s3:
+    endpoint: ""
+    region: "us-east-1"
+    bucket: ""
+    access_key: ""
+    secret_key: ""
+    use_ssl: true
+    path_style: false # true for most non-AWS S3-compatible backends (e.g. MinIO)
 
 database:
   driver: "postgres"
@@ -27,6 +44,14 @@ security:
   hsts_max_age_seconds: 31536000
   openapi_cors_origin: "https://registry.skillforge.local"
   content_security_policy: "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' https://cdn.jsdelivr.net; connect-src 'self'"
+  # CIDR ranges of reverse proxies whose X-Forwarded-For header is trusted
+  # for client IP resolution (audit logging, rate limiting). Required when
+  # running behind a load balancer/reverse proxy — otherwise every request
+  # not from one of these ranges has X-Forwarded-For ignored entirely, and
+  # a client cannot spoof its audit-logged or rate-limited identity by
+  # setting the header itself. Example for a proxy on the same host:
+  #   trusted_proxies: ["127.0.0.1/32"]
+  trusted_proxies: []
 
 email:
   smtp_enabled: true
@@ -50,6 +75,24 @@ production:
 proxy:
   enabled: false
   upstreams: []
+
+rate_limit:
+  enabled: true
+  requests_per_minute: 300
+  # "memory" (default) counts per-instance — each replica behind a load
+  # balancer gets its own independent budget, so a client effectively gets
+  # (num_replicas × requests_per_minute). "redis" shares one counter across
+  # every replica pointed at the same Redis instance, which is required
+  # for the limit to actually hold once more than one registry instance is
+  # running.
+  backend: "memory"
+  redis:
+    addr: "" # e.g. "localhost:6379"; only read when backend is "redis"
+    # password is intentionally not shown here — set it via the
+    # SKILL_REGISTRY_REDIS_PASSWORD env var instead of committing it to
+    # this file.
+    db: 0
+    key_prefix: "skillforge:ratelimit:"
 
 validation:
   blocked_extensions:
