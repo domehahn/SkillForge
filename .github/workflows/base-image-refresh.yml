@@ -27,7 +27,7 @@ jobs:
 
       - name: Open issue on scan failure
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const title = `[Security] Base image CVEs found - ${new Date().toISOString().split('T')[0]}`;
