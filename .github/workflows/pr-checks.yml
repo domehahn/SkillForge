@@ -92,7 +92,7 @@ jobs:
     steps:
       - name: Comment PR summary
         if: github.event.action == 'opened'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const body = `## PR Checks Summary
