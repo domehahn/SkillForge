@@ -47,6 +47,12 @@ jobs:
               continue
             fi
             
+            # Skip if not a skill (no skill.yaml file)
+            if [ ! -f "$example_dir/skill.yaml" ]; then
+              echo "Skipping $example_dir (not a skill)"
+              continue
+            fi
+            
             example_name=$(basename "$example_dir")
             echo "::group::Validating $example_name"
             

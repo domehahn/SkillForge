@@ -17,8 +17,8 @@ services:
 
   registry:
     build:
-      context: ../..
-      dockerfile: SkillForge/skill-registry/Dockerfile
+      context: ..
+      dockerfile: skill-registry/Dockerfile
     image: skill-registry:latest
     container_name: skill-registry
     expose:
