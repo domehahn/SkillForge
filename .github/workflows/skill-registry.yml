@@ -3,15 +3,16 @@ name: skill-registry
 on:
   push:
     branches: [main]
-    paths:
-      - 'skill-registry/**'
-      - 'sklib/**'
-      - '.github/workflows/skill-registry.yml'
-  pull_request:
-    paths:
-      - 'skill-registry/**'
-      - 'sklib/**'
-      - '.github/workflows/skill-registry.yml'
+  pull_request: {}
+
+# No path filters, deliberately: this workflow's jobs (test, build-image) are
+# used as required branch-protection status checks for main. A path-filtered
+# required check never gets reported for a PR that doesn't touch the
+# filtered paths, which GitHub then shows as permanently "Expected —
+# waiting for status to be reported" — silently blocking merge forever
+# instead of just skipping. Always running is the safe default for anything
+# required; scope narrowing belongs to jobs that are *not* required checks
+# (see integration-tests.yml).
 
 jobs:
   test:
