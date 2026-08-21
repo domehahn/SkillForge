@@ -160,6 +160,23 @@ func (h *Handler) DownloadArtifact(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+func (h *Handler) DeleteArtifactVersion(w http.ResponseWriter, r *http.Request) {
+	kind := chi.URLParam(r, "kind")
+	namespace := chi.URLParam(r, "namespace")
+	name := chi.URLParam(r, "name")
+	version := chi.URLParam(r, "version")
+	if !h.requireNamespaceRole(w, r, namespace, "maintainer") {
+		return
+	}
+	actor := auth.ActorFromContext(r.Context())
+	if err := h.registry.DeleteArtifactVersion(r.Context(), kind, namespace, name, version, actor); err != nil {
+		WriteError(w, http.StatusBadRequest, "DELETE_FAILED", err.Error())
+		return
+	}
+	h.logAudit(r, actor, "artifact.delete", kind+"/"+namespace+"/"+name+"@"+version)
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (h *Handler) ArtifactGraph(w http.ResponseWriter, r *http.Request) {
 	if !h.requireArtifactRead(w, r) {
 		return
@@ -730,16 +747,6 @@ func (h *Handler) AtomFeed(w http.ResponseWriter, r *http.Request) {
 		Author  struct {
 			Name string `xml:"name"`
 		} `xml:"author"`
-	}
-	type atomFeed struct {
-		XMLName xml.Name    `xml:"feed"`
-		Xmlns   string      `xml:"xmlns,attr"`
-		Title   string      `xml:"title"`
-		Link    string      `xml:"link"`
-		SelfURL string      `xml:"-"`
-		ID      string      `xml:"id"`
-		Updated string      `xml:"updated"`
-		Entries []atomEntry `xml:"entry"`
 	}
 
 	updated := ""

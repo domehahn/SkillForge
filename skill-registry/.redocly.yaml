@@ -1,0 +1,29 @@
+# Redocly configuration for OpenAPI validation
+# https://redocly.com/docs/cli/configuration/
+
+extends:
+  - recommended
+
+rules:
+  # Relax path parameter validation - allow undefined parameters
+  path-parameters-defined: warn
+  
+  # Relax security rules - many public endpoints don't need auth
+  security-defined: warn
+  
+  # Info recommendations
+  info-license: warn
+  info-contact: warn
+  
+  # Operation recommendations  
+  operation-operationId: warn
+  operation-4xx-response: warn
+  operation-success-response: error
+  
+  # Server configuration
+  no-server-example.com: warn
+  
+  # Keep important rules as errors
+  no-unresolved-refs: error
+  no-undefined-server-variable: error
+  operation-2xx-response: error
