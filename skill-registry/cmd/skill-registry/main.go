@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/redis/go-redis/v9"
 	"github.com/skillforge/skill-registry/internal/api"
 	"github.com/skillforge/skill-registry/internal/audit"
 	"github.com/skillforge/skill-registry/internal/auth"
@@ -60,7 +61,7 @@ func main() {
 	defer repo.Close()
 
 	// Initialize storage
-	store, err := storage.NewStorage(cfg.Storage.DataDir)
+	store, err := newStorageBackend(context.Background(), cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
@@ -136,7 +137,11 @@ func main() {
 		r.Use(observability.SecurityHeadersMiddleware(cfg.Security))
 	}
 	if cfg.RateLimit.Enabled {
-		limiter := ratelimit.New(cfg.RateLimit.RequestsPerMinute, time.Minute)
+		backend, err := newRateLimitBackend(cfg)
+		if err != nil {
+			log.Fatalf("Failed to initialize rate limiter: %v", err)
+		}
+		limiter := ratelimit.New(backend, cfg.Security.TrustedProxies, logger)
 		r.Use(ratelimit.Middleware(limiter))
 	}
 
@@ -391,6 +396,53 @@ func databaseDSN(cfg *config.Config) string {
 		return cfg.Database.DSN
 	}
 	return cfg.Database.Path
+}
+
+// newRateLimitBackend constructs the ratelimit.Backend selected by
+// cfg.RateLimit.Backend. Kept here for the same layering reason as
+// newStorageBackend below.
+func newRateLimitBackend(cfg *config.Config) (ratelimit.Backend, error) {
+	window := time.Minute
+	switch cfg.RateLimit.Backend {
+	case "", "memory":
+		return ratelimit.NewMemoryBackend(cfg.RateLimit.RequestsPerMinute, window), nil
+	case "redis":
+		client := redis.NewClient(&redis.Options{
+			Addr:     cfg.RateLimit.Redis.Addr,
+			Password: cfg.RateLimit.Redis.Password,
+			DB:       cfg.RateLimit.Redis.DB,
+		})
+		return ratelimit.NewRedisBackend(client, cfg.RateLimit.RequestsPerMinute, window, cfg.RateLimit.Redis.KeyPrefix), nil
+	default:
+		// cfg.Validate() should have already rejected this.
+		return nil, fmt.Errorf("unknown rate_limit.backend %q", cfg.RateLimit.Backend)
+	}
+}
+
+// newStorageBackend constructs the storage.Backend selected by
+// cfg.Storage.Backend. Kept here rather than in internal/storage itself so
+// that package doesn't need to import internal/config — config describes
+// the app's settings, storage shouldn't need to know the whole app's
+// config shape just to pick a backend.
+func newStorageBackend(ctx context.Context, cfg *config.Config) (storage.Backend, error) {
+	switch cfg.Storage.Backend {
+	case "", "filesystem":
+		return storage.NewStorage(cfg.Storage.DataDir)
+	case "s3":
+		return storage.NewS3Storage(ctx,
+			cfg.Storage.S3.Endpoint,
+			cfg.Storage.S3.Region,
+			cfg.Storage.S3.Bucket,
+			cfg.Storage.S3.AccessKey,
+			cfg.Storage.S3.SecretKey,
+			cfg.Storage.S3.UseSSL,
+			cfg.Storage.S3.PathStyle,
+		)
+	default:
+		// cfg.Validate() should have already rejected this, but don't
+		// silently fall back to filesystem if it somehow wasn't called.
+		return nil, fmt.Errorf("unknown storage.backend %q", cfg.Storage.Backend)
+	}
 }
 
 func backupCommand() {

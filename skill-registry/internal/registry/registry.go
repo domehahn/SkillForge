@@ -26,13 +26,16 @@ func compatibleMap(s *spec.Skill) map[string]string {
 // Registry orchestrates skill publishing and retrieval
 type Registry struct {
 	repo      *metadata.Repository
-	storage   *storage.Storage
+	storage   storage.Backend
 	validator *validation.Validator
 	logger    *slog.Logger
 }
 
-// NewRegistry creates a new registry instance
-func NewRegistry(repo *metadata.Repository, storage *storage.Storage, validator *validation.Validator, logger *slog.Logger) *Registry {
+// NewRegistry creates a new registry instance. storage may be either
+// *storage.Storage (filesystem, single-node) or *storage.S3Storage
+// (S3-compatible, shared across replicas) — anything satisfying
+// storage.Backend.
+func NewRegistry(repo *metadata.Repository, storage storage.Backend, validator *validation.Validator, logger *slog.Logger) *Registry {
 	return &Registry{
 		repo:      repo,
 		storage:   storage,
@@ -200,7 +203,6 @@ func (r *Registry) Metrics(ctx context.Context) (*metadata.MetricsSnapshot, erro
 func (r *Registry) Ping(ctx context.Context) error {
 	return r.repo.Ping(ctx)
 }
-
 
 func (r *Registry) calculateLatest(ctx context.Context, namespace, name, candidate string) (string, error) {
 	skill, err := r.repo.GetSkill(ctx, namespace, name)
