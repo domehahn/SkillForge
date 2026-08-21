@@ -45,13 +45,19 @@ func TestBackupAndRestore(t *testing.T) {
 	}
 
 	// Record the digest reported at publish time.
-	resolveResp, _ := http.Get(src.URL + "/api/v1/skills/test/backup-skill/resolve")
+	resolveResp, err := http.Get(src.URL + "/api/v1/skills/test/backup-skill/resolve")
+	if err != nil {
+		t.Fatalf("resolve on source: %v", err)
+	}
 	defer resolveResp.Body.Close()
 	if resolveResp.StatusCode != http.StatusOK {
 		t.Fatalf("resolve on source: expected 200, got %d", resolveResp.StatusCode)
 	}
 
-	dlResp, _ := http.Get(src.URL + "/api/v1/skills/test/backup-skill/versions/1.0.0/download")
+	dlResp, err := http.Get(src.URL + "/api/v1/skills/test/backup-skill/versions/1.0.0/download")
+	if err != nil {
+		t.Fatalf("download on source: %v", err)
+	}
 	defer dlResp.Body.Close()
 	originalDigest := dlResp.Header.Get("X-Skill-Digest-SHA256")
 	originalBody, _ := io.ReadAll(dlResp.Body)

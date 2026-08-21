@@ -176,7 +176,9 @@ func validateFlow(m *metadata.ArtifactManifest) error {
 	inDegree := make(map[string]int, len(steps))
 	adj := make(map[string][]string, len(steps))
 	for _, s := range steps {
-		inDegree[s.ID] = inDegree[s.ID] // ensure key exists
+		if _, ok := inDegree[s.ID]; !ok {
+			inDegree[s.ID] = 0
+		}
 		for _, dep := range s.Needs {
 			if !ids[dep] {
 				return fmt.Errorf("flow step %q needs unknown step %q", s.ID, dep)

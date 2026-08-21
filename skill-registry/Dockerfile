@@ -2,9 +2,9 @@
 FROM node:22-alpine AS web-builder
 
 WORKDIR /web
-COPY SkillForge/skill-registry/web/package*.json ./
+COPY skill-registry/web/package*.json ./
 RUN npm ci
-COPY SkillForge/skill-registry/web/ ./
+COPY skill-registry/web/ ./
 RUN npm run build
 
 # Build Go binaries
@@ -14,16 +14,13 @@ RUN apk add --no-cache git make gcc musl-dev sqlite-dev
 
 WORKDIR /build
 
-# Copy sklib source next to skill-registry so the go.mod replace directive resolves.
-COPY sklib/ ./sklib/
-
 # Copy skill-registry module manifests and download external dependencies.
-# GOWORK=off disables workspace mode; go.mod replace handles sklib locally.
-COPY SkillForge/skill-registry/go.mod SkillForge/skill-registry/go.sum ./skill-registry/
+# GOWORK=off keeps the image build independent from any local workspace file.
+COPY skill-registry/go.mod skill-registry/go.sum ./skill-registry/
 RUN cd skill-registry && GOWORK=off go mod download
 
 # Copy full skill-registry source
-COPY SkillForge/skill-registry/ ./skill-registry/
+COPY skill-registry/ ./skill-registry/
 
 WORKDIR /build/skill-registry
 
