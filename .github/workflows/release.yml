@@ -13,25 +13,37 @@ permissions:
 jobs:
   build:
     name: Build binaries
-    runs-on: ubuntu-latest
+    # darwin targets build natively on macos-latest — CGO (needed for the
+    # sqlite3 driver) can't be reliably cross-compiled to Darwin from a
+    # Linux runner without an osxcross toolchain, which this workflow never
+    # actually installed (it referenced o64-clang/oa64-clang binaries that
+    # were never present, so darwin builds always failed at compile time).
+    # linux/windows still cross-compile from ubuntu-latest, which works
+    # fine with the gcc cross toolchains actually installed below.
+    runs-on: ${{ matrix.os }}
     env:
       GOWORK: off
       CGO_ENABLED: "1"
     strategy:
       matrix:
         include:
-          - goos: linux
+          - os: ubuntu-latest
+            goos: linux
             goarch: amd64
-          - goos: linux
+          - os: ubuntu-latest
+            goos: linux
             goarch: arm64
             cc: aarch64-linux-gnu-gcc
-          - goos: darwin
+          - os: macos-latest
+            goos: darwin
             goarch: amd64
-            cc: o64-clang
-          - goos: darwin
+            cc: clang
+          - os: macos-latest
+            goos: darwin
             goarch: arm64
-            cc: oa64-clang
-          - goos: windows
+            cc: clang
+          - os: ubuntu-latest
+            goos: windows
             goarch: amd64
             cc: x86_64-w64-mingw32-gcc
             ext: .exe
@@ -44,7 +56,8 @@ jobs:
           go-version-file: skill-registry/go.mod
           cache-dependency-path: skill-registry/go.sum
 
-      - name: Install cross-compile toolchains
+      - name: Install Linux cross-compile toolchains
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y gcc libsqlite3-dev \
             gcc-aarch64-linux-gnu \
@@ -121,7 +134,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: SkillForge/skill-registry/Dockerfile
+          file: skill-registry/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |

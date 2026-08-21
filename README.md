@@ -9,6 +9,7 @@ SkillForge is a self-hosted registry server for immutable AI Agent Skill artifac
 
 Use `skcr` to scaffold and render local agent/project structures.
 Use `skpm` to validate, package, publish, install, lock, update, and verify skills.
+Use `skil` to scan skills for security issues and produce attestable evidence.
 Use SkillForge as the self-hosted registry server for immutable skill artifacts.
 Use `skforge` for SkillForge-specific administration, governance, and debugging.
 
@@ -33,6 +34,10 @@ SkillForge / `skforge` owns registry-server concerns:
 - deprecate, yank, unyank, delete governance
 - token management and audit logging
 - namespace ACLs and webhooks
+- attestation storage (`/artifacts/{kind}/.../attestations`) — a generic,
+  opaque-predicate record store that `skpm attest`/`attestations` use to
+  attach `skil`-produced evidence to a published skill version; SkillForge
+  does not interpret the predicate or run any analysis itself
 
 `skpm` owns consumer lifecycle:
 
@@ -42,6 +47,8 @@ SkillForge / `skforge` owns registry-server concerns:
 - `agent-skills.yaml` and `agent-skills.lock` management
 - install, update, outdated, and verify workflows
 - multi-registry client behavior
+- attaching third-party attestations (e.g. `skil` evidence) to a published
+  version via SkillForge's attestation API
 
 `skcr` owns local creation and rendering:
 
@@ -49,7 +56,20 @@ SkillForge / `skforge` owns registry-server concerns:
 - bake/render platform-specific project files
 - manage `agentic.bake.yaml` and `.agentic-template.lock`
 
-SkillForge must not absorb `skcr bake`, project template rendering, or consumer-lifecycle commands (`install`, `lock`, `verify`) that belong to `skpm`.
+`skil` owns security and assurance:
+
+- static/semantic security analysis of a skill's contents
+- declared-vs-observed capability verification
+- policy decisions, evidence, and signed attestation
+- does not touch package versioning, publishing, or the registry — its
+  output can optionally be attached to a SkillForge-hosted version via
+  `skpm attest`, but `skil` itself has no dependency on this repo or `skpm`
+
+SkillForge must not absorb `skcr bake`, project template rendering, security
+analysis that belongs to `skil`, or consumer-lifecycle commands (`install`,
+`lock`, `verify`) that belong to `skpm`. SkillForge previously shipped a
+duplicate `skpm` reimplementation under `skill-registry/cmd/skpm`; it has
+been removed — `skpm` is the only package-manager CLI in this toolchain.
 
 ## Versioning Model
 
