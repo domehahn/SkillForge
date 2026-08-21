@@ -39,16 +39,16 @@ type Issue struct {
 
 // ValidationResult represents the result of skill validation.
 type ValidationResult struct {
-	Valid            bool                    `json:"valid"`
-	Errors           []string                `json:"errors"`
-	Warnings         []string                `json:"warnings"`
-	StructuredErrors []Issue                 `json:"structured_errors,omitempty"`
-	StructuredWarns  []Issue                 `json:"structured_warnings,omitempty"`
-	Metadata         *spec.Skill             `json:"metadata,omitempty"`
-	Files            []string                `json:"files,omitempty"`
-	Deterministic    bool                    `json:"deterministic"`
-	Profile          Profile                 `json:"profile"`
-	Readme           string                  `json:"-"` // extracted README.md or SKILL.md content
+	Valid            bool        `json:"valid"`
+	Errors           []string    `json:"errors"`
+	Warnings         []string    `json:"warnings"`
+	StructuredErrors []Issue     `json:"structured_errors,omitempty"`
+	StructuredWarns  []Issue     `json:"structured_warnings,omitempty"`
+	Metadata         *spec.Skill `json:"metadata,omitempty"`
+	Files            []string    `json:"files,omitempty"`
+	Deterministic    bool        `json:"deterministic"`
+	Profile          Profile     `json:"profile"`
+	Readme           string      `json:"-"` // extracted README.md or SKILL.md content
 }
 
 type packageFile struct {
@@ -268,7 +268,7 @@ func (v *Validator) readTarGz(data []byte, result *ValidationResult) ([]packageF
 			return nil, fmt.Errorf("failed to read tar: %w", err)
 		}
 		pf := packageFile{Name: header.Name, Mode: os.FileMode(header.Mode), Size: header.Size, Type: header.Typeflag, Linkname: header.Linkname}
-		if header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA {
+		if header.Typeflag == tar.TypeReg || header.Typeflag == 0 {
 			pf.Content, _ = io.ReadAll(tr)
 		}
 		files = append(files, pf)
@@ -305,7 +305,7 @@ func (v *Validator) validateFiles(files []packageFile, result *ValidationResult)
 		if ignoredTree(name) {
 			result.addWarning("BUILD_OUTPUT", name, "build output, dependency directories, and caches should be excluded")
 		}
-		if f.Type == tar.TypeReg || f.Type == tar.TypeRegA || f.Type == 0 {
+		if f.Type == tar.TypeReg || f.Type == 0 {
 			ext := strings.ToLower(filepath.Ext(name))
 			if v.blockedExtensions[ext] {
 				result.addError("BLOCKED_EXTENSION", name, fmt.Sprintf("blocked file extension: %s", name))

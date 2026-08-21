@@ -472,3 +472,34 @@ func TestValidateProductionEnforce(t *testing.T) {
 		t.Fatalf("expected production enforcement to pass, got %v", err)
 	}
 }
+
+func TestValidate_TrustedProxiesRejectsInvalidCIDR(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Security.TrustedProxies = []string{"not-a-cidr"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected an invalid CIDR in security.trusted_proxies to fail validation")
+	}
+}
+
+func TestValidate_TrustedProxiesAcceptsValidCIDR(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Security.TrustedProxies = []string{"10.0.0.0/8", "127.0.0.1/32"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid CIDRs to pass validation, got %v", err)
+	}
+}
+
+func TestApplyEnvOverrides_TrustedProxies(t *testing.T) {
+	t.Setenv("SKILL_REGISTRY_TRUSTED_PROXIES", "10.0.0.0/8, 127.0.0.1/32,192.168.1.0/24")
+	cfg := DefaultConfig()
+	applyEnvOverrides(cfg)
+	want := []string{"10.0.0.0/8", "127.0.0.1/32", "192.168.1.0/24"}
+	if len(cfg.Security.TrustedProxies) != len(want) {
+		t.Fatalf("expected %v, got %v", want, cfg.Security.TrustedProxies)
+	}
+	for i, v := range want {
+		if cfg.Security.TrustedProxies[i] != v {
+			t.Fatalf("expected %v, got %v", want, cfg.Security.TrustedProxies)
+		}
+	}
+}

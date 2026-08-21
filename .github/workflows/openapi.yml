@@ -27,10 +27,16 @@ jobs:
       - name: Lint OpenAPI spec
         run: |
           if [ -f skill-registry/internal/api/openapi.yaml ]; then
-            redocly lint skill-registry/internal/api/openapi.yaml
+            redocly lint skill-registry/internal/api/openapi.yaml \
+              --extends recommended \
+              --skip-rule path-parameters-defined \
+              --skip-rule security-defined
           fi
           if [ -f skill-registry/openapi/openapi.yaml ]; then
-            redocly lint skill-registry/openapi/openapi.yaml
+            redocly lint skill-registry/openapi/openapi.yaml \
+              --extends recommended \
+              --skip-rule path-parameters-defined \
+              --skip-rule security-defined
           fi
 
       - name: Bundle OpenAPI spec

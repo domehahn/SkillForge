@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/skillforge/skill-registry/internal/audit"
 	"github.com/skillforge/skill-registry/internal/auth"
+	"github.com/skillforge/skill-registry/internal/clientip"
 	"github.com/skillforge/skill-registry/internal/config"
 	"github.com/skillforge/skill-registry/internal/email"
 	"github.com/skillforge/skill-registry/internal/metadata"
@@ -29,23 +29,25 @@ import (
 
 // Handler handles HTTP requests
 type Handler struct {
-	registry *registry.Registry
-	auth     *auth.Authenticator
-	audit    *audit.Repository // may be nil; no audit logging when nil
-	logger   *slog.Logger
-	config   *config.Config
-	email    *email.Sender
+	registry  *registry.Registry
+	auth      *auth.Authenticator
+	audit     *audit.Repository // may be nil; no audit logging when nil
+	logger    *slog.Logger
+	config    *config.Config
+	email     *email.Sender
+	clientIPs *clientip.Resolver
 }
 
 // NewHandler creates a new API handler. auditRepo may be nil to disable audit logging.
 func NewHandler(reg *registry.Registry, authenticator *auth.Authenticator, auditRepo *audit.Repository, logger *slog.Logger, cfg *config.Config) *Handler {
 	return &Handler{
-		registry: reg,
-		auth:     authenticator,
-		audit:    auditRepo,
-		logger:   logger,
-		config:   cfg,
-		email:    email.NewSender(cfg.Email),
+		registry:  reg,
+		auth:      authenticator,
+		audit:     auditRepo,
+		logger:    logger,
+		config:    cfg,
+		email:     email.NewSender(cfg.Email),
+		clientIPs: clientip.NewResolver(cfg.Security.TrustedProxies),
 	}
 }
 
@@ -57,19 +59,8 @@ func (h *Handler) logAudit(r *http.Request, actor, action, target string) {
 		Actor:     actor,
 		Action:    action,
 		Target:    target,
-		IPAddress: clientIP(r),
+		IPAddress: h.clientIPs.Resolve(r),
 	})
-}
-
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // RegisterRoutes registers all API routes
@@ -209,6 +200,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.Middleware("delete"))
 			r.Delete("/skills/{namespace}/{name}/versions/{version}", h.DeleteVersion)
+			r.Delete("/artifacts/{kind}/{namespace}/{name}/versions/{version}", h.DeleteArtifactVersion)
 		})
 
 		// Admin-only endpoints
