@@ -1,19 +1,19 @@
 module github.com/skillforge/skill-registry
 
-go 1.25.13
+go 1.26.0
 
 require (
 	github.com/domehahn/sklib v0.3.0
-	github.com/go-chi/chi/v5 v5.3.0
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/lib/pq v1.12.3
-	github.com/mattn/go-sqlite3 v1.14.47
+	github.com/mattn/go-sqlite3 v1.14.50
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	github.com/minio/minio-go/v7 v7.3.0
 	github.com/redis/go-redis/v9 v9.22.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
