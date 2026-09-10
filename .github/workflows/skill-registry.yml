@@ -26,9 +26,9 @@ jobs:
       CGO_ENABLED: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a555e9f5067d0080324757d54805c85ce # v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version-file: skill-registry/go.mod
           cache-dependency-path: skill-registry/go.sum
@@ -47,12 +47,12 @@ jobs:
 
       - name: govulncheck
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
       - name: staticcheck
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install honnef.co/go/tools/cmd/staticcheck@v0.6.1
           staticcheck ./...
 
   build-image:
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a555e9f5067d0080324757d54805c85ce # v4.2.2
 
       - name: Build Docker image
         run: |
@@ -82,6 +82,11 @@ jobs:
           docker stop skill-registry-ci
 
       - name: Scan image for vulnerabilities
-        run: |
-          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-          trivy image --exit-code 1 --ignore-unfixed --severity CRITICAL,HIGH skill-registry:ci
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394d2dd8c87dbb9 # v0.29.0
+        with:
+          image-ref: 'skill-registry:ci'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'

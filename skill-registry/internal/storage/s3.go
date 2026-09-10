@@ -158,6 +158,18 @@ func (s *S3Storage) Exists(digest string) bool {
 	return err == nil
 }
 
+// Ping checks if the S3 bucket exists and is accessible.
+func (s *S3Storage) Ping(ctx context.Context) error {
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return fmt.Errorf("s3 storage ping: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("s3 storage ping: bucket %q does not exist", s.bucket)
+	}
+	return nil
+}
+
 func isNotFound(err error) bool {
 	var errResp minio.ErrorResponse
 	if errors.As(err, &errResp) {

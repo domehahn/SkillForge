@@ -93,12 +93,17 @@ func TestBackupAndRestore_FullLifecycle(t *testing.T) {
 		t.Fatalf("failed to build package: %v", err)
 	}
 
+	client := srv.Client()
+
 	pubReq, _ := http.NewRequest("PUT", srv.URL+"/api/v1/skills/br-ns/br-skill/versions/1.0.0", bytes.NewReader(pkgData))
 	pubReq.Header.Set("Content-Type", "application/gzip")
 	pubReq.Header.Set("Authorization", "Bearer "+token.Token)
-	pubResp, err := http.DefaultClient.Do(pubReq)
-	if err != nil || pubResp.StatusCode != http.StatusCreated {
-		t.Fatalf("publish failed: status=%v, err=%v", pubResp.Status, err)
+	pubResp, err := client.Do(pubReq)
+	if err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if pubResp.StatusCode != http.StatusCreated {
+		t.Fatalf("publish failed: status=%v", pubResp.Status)
 	}
 	pubResp.Body.Close()
 
@@ -118,9 +123,12 @@ func TestBackupAndRestore_FullLifecycle(t *testing.T) {
 	attestReq, _ := http.NewRequest("POST", srv.URL+"/api/v1/artifacts/skill/br-ns/br-skill/versions/1.0.0/attestations", bytes.NewReader(attestBody))
 	attestReq.Header.Set("Content-Type", "application/json")
 	attestReq.Header.Set("Authorization", "Bearer "+token.Token)
-	attestResp, err := http.DefaultClient.Do(attestReq)
-	if err != nil || (attestResp.StatusCode != http.StatusOK && attestResp.StatusCode != http.StatusCreated) {
-		t.Fatalf("attestation failed: status=%v, err=%v", attestResp.Status, err)
+	attestResp, err := client.Do(attestReq)
+	if err != nil {
+		t.Fatalf("attestation failed: %v", err)
+	}
+	if attestResp.StatusCode != http.StatusOK && attestResp.StatusCode != http.StatusCreated {
+		t.Fatalf("attestation failed: status=%v", attestResp.Status)
 	}
 	attestResp.Body.Close()
 
@@ -129,9 +137,12 @@ func TestBackupAndRestore_FullLifecycle(t *testing.T) {
 	yankReq, _ := http.NewRequest("POST", srv.URL+"/api/v1/skills/br-ns/br-skill/versions/1.0.0/yank", bytes.NewReader(yankBody))
 	yankReq.Header.Set("Content-Type", "application/json")
 	yankReq.Header.Set("Authorization", "Bearer "+token.Token)
-	yankResp, err := http.DefaultClient.Do(yankReq)
-	if err != nil || yankResp.StatusCode != http.StatusOK {
-		t.Fatalf("yank failed: status=%v, err=%v", yankResp.Status, err)
+	yankResp, err := client.Do(yankReq)
+	if err != nil {
+		t.Fatalf("yank failed: %v", err)
+	}
+	if yankResp.StatusCode != http.StatusOK {
+		t.Fatalf("yank failed: status=%v", yankResp.Status)
 	}
 	yankResp.Body.Close()
 

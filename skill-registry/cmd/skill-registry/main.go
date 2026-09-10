@@ -141,6 +141,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize rate limiter: %v", err)
 		}
+		handler.SetRateLimitBackend(backend)
 		limiter := ratelimit.New(backend, cfg.Security.TrustedProxies, logger)
 		r.Use(ratelimit.Middleware(limiter))
 	}

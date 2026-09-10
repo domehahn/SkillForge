@@ -12,4 +12,5 @@ import "context"
 // holds regardless of which replica a given request lands on.
 type Backend interface {
 	Allow(ctx context.Context, key string) (bool, error)
+	Ping(ctx context.Context) error
 }

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -125,6 +126,12 @@ func (s *Storage) Delete(digest string) error {
 func (s *Storage) Exists(digest string) bool {
 	_, err := os.Stat(s.blobPath(digest))
 	return err == nil
+}
+
+// Ping checks if data directory is accessible.
+func (s *Storage) Ping(_ context.Context) error {
+	_, err := os.Stat(s.dataDir)
+	return err
 }
 
 func (s *Storage) blobPath(digest string) string {
