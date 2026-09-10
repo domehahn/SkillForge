@@ -28,6 +28,7 @@ func setupTenantIsolationServer(t *testing.T) (*chi.Mux, *metadata.Repository, s
 	if err != nil {
 		t.Fatalf("failed to create repo: %v", err)
 	}
+	t.Cleanup(func() { repo.Close() })
 
 	store, err := storage.NewStorage(tmpDir)
 	if err != nil {
