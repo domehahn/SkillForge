@@ -81,7 +81,7 @@ func (s *Storage) StoreArtifact(kind, namespace, name, version string, data []by
 	return digest, nil
 }
 
-// Retrieve retrieves package data by digest
+// Retrieve retrieves package data by digest and verifies payload integrity.
 func (s *Storage) Retrieve(digest string) ([]byte, error) {
 	blobPath := s.blobPath(digest)
 	data, err := os.ReadFile(blobPath)
@@ -91,10 +91,15 @@ func (s *Storage) Retrieve(digest string) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("failed to read package: %w", err)
 	}
+	hash := sha256.Sum256(data)
+	actual := hex.EncodeToString(hash[:])
+	if actual != digest {
+		return nil, fmt.Errorf("%w: expected %s, got %s", ErrCorruptBlob, digest, actual)
+	}
 	return data, nil
 }
 
-// RetrieveReader retrieves package data as a reader
+// RetrieveReader retrieves package data as a reader with on-the-fly digest verification.
 func (s *Storage) RetrieveReader(digest string) (io.ReadCloser, error) {
 	blobPath := s.blobPath(digest)
 	file, err := os.Open(blobPath)
@@ -104,7 +109,7 @@ func (s *Storage) RetrieveReader(digest string) (io.ReadCloser, error) {
 		}
 		return nil, fmt.Errorf("failed to open package: %w", err)
 	}
-	return file, nil
+	return newDigestVerifyingReader(file, digest), nil
 }
 
 // Delete deletes a package by digest

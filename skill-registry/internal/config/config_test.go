@@ -451,6 +451,13 @@ func TestValidateProductionEnforce(t *testing.T) {
 
 	cfg.Auth.Enabled = true
 	cfg.Auth.BcryptCost = 12
+	cfg.Database.Driver = "postgres"
+	cfg.Database.DSN = "postgres://user:pass@localhost:5432/db"
+	cfg.Storage.Backend = "s3"
+	cfg.Storage.S3.Bucket = "my-bucket"
+	cfg.Storage.S3.Endpoint = "localhost:9000"
+	cfg.RateLimit.Backend = "redis"
+	cfg.RateLimit.Redis.Addr = "localhost:6379"
 	cfg.Security.HeadersEnabled = true
 	cfg.Security.OpenAPICORSOrigin = "https://registry.example.com"
 	cfg.TLS.Enabled = true

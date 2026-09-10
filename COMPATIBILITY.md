@@ -1,37 +1,27 @@
-# Cross-repository compatibility matrix
+# Toolchain compatibility
 
-SkillForge (`skill-registry`) is the registry/server end of a four-repo
-agentic skill supply chain:
+The four products remain independent: skcr compiles, skil evaluates trust,
+skpm packages and installs, SkillForge stores and governs artifacts.
 
-```
-skcr (author/compile)  →  skil (scan/attest)  →  skpm (package/publish)  →  SkillForge (registry)
-```
+`.github/workflows/toolchain.yml` runs real consumer tests on every PR,
+main push, daily schedule and manual dispatch. The repository being changed
+uses the event commit (including PR merge contents); its sibling uses main
+or an explicit stable release. Exact checkout SHAs are retained as artifacts.
+No cross-repository write token or repository_dispatch secret is required.
 
-SkillForge is a server with a REST API contract; the compatibility that
-matters is "does skpm's client code still work against this server",
-which is naturally tested from skpm's side (the client), not by
-SkillForge pinning a version of skpm and driving it — SkillForge has no
-CI job of its own that checks out skpm or skil.
+Supported stable baselines: skil **v0.6.0**, skpm **v2.3.0** (GitHub latest
+release lookup on 2026-09-09). SkillForge has **no stable release** at that
+lookup; stable SkillForge compatibility is unavailable, not PASS. Add its
+first supported release as an additional matrix cell before claiming readiness.
+A fixed historical SkillForge commit is not called current.
 
-| Pairing                                             | Enforced by                                                                                 | Currently pinned to | Status |
-|-------------------------------------------------------|-----------------------------------------------------------------------------------------------|----------------------|--------|
-| skpm `main` (current) × SkillForge `main` (current)   | [skpm's `.github/workflows/ci.yml` → `skillforge-e2e`](https://github.com/domehahn/skpm/blob/main/.github/workflows/ci.yml) | [this repo @ 5e80b37](https://github.com/domehahn/SkillForge/commit/5e80b37ce5c7d6d4d51c5ab578e2bbfb23e5600a) (as pinned by skpm) | ✅ enforced (from skpm's side) |
-| skpm `main` (current) × SkillForge stable             | —                                                                                               | — | ⏳ not yet available: SkillForge has no tagged release yet |
+Each producer runs its consumers: skil PRs compile skcr fixtures and run
+skpm's signature verifier; SkillForge PRs run current and stable skpm.
+Consumer PRs also run against current providers and available stable baselines.
+Select Toolchain compatibility as required checks in branch protection.
+Source-controlled workflows cannot configure remote branch protection.
 
-## What this means in practice
-
-Whenever this repo's `main` changes in a way that could break skpm's
-`AttestationRegistry`/package-publish/download client contract, that
-won't be caught by *this* repo's own CI — it surfaces the next time
-skpm's `skillforge-e2e` job bumps its pinned commit and re-runs the real
-cross-repo contract test (`skpm/tests/integration/skillforge_e2e_test.go`,
-tag `e2e`) against a real server built from the new commit. See skpm's
-own `COMPATIBILITY.md` for exactly what that test checks and how the pin
-gets bumped.
-
-## Once SkillForge has a tagged release
-
-The "SkillForge stable" cell becomes available once this repo cuts its
-first tag (mirroring what skil did for [v0.2.0](https://github.com/domehahn/skil/releases/tag/v0.2.0)) — at that point skpm's
-`skillforge-e2e` job should track a release tag instead of a commit SHA,
-the same upgrade already made for skpm/skcr's skil-interop pins.
+Before moving a stable pin, run the same tests at the new tag and record the
+resolved commit. Main is deliberately floating for drift detection; the logged
+SHAs make every failure reproducible. No current/stable pairing implies full
+native isolation, release signing, HA, or whole-toolchain readiness.

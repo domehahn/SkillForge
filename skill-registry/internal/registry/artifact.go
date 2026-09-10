@@ -3,6 +3,9 @@ package registry
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -242,21 +245,36 @@ func (r *Registry) CreateArtifactAttestation(ctx context.Context, kind, namespac
 	if err != nil {
 		return nil, err
 	}
-	if attestationType != "signature" && attestationType != "scan" && attestationType != "provenance" && attestationType != "sbom" {
-		return nil, fmt.Errorf("unsupported attestation type")
+	if attestationType == "" {
+		return nil, fmt.Errorf("attestation type must not be empty")
+	}
+	if digest != artifactVersion.DigestSHA256 || len(digest) != 64 {
+		return nil, fmt.Errorf("ATTESTATION_DIGEST_MISMATCH: evidence must reference the published artifact")
+	}
+	if len(predicate) == 0 {
+		return nil, fmt.Errorf("ATTESTATION_INVALID: predicate is required")
+	}
+	predicateBytes, _ := json.Marshal(predicate)
+	if len(predicateBytes) > 1048576 {
+		return nil, fmt.Errorf("ATTESTATION_SIZE_EXCEEDED: predicate size must be <= 1MB")
+	}
+	if attestationType == "scan" {
+		subject, ok := predicate["subject"].(map[string]interface{})
+		if !ok || subject["sha256"] != digest {
+			return nil, fmt.Errorf("ATTESTATION_SUBJECT_MISMATCH: predicate does not identify the published artifact")
+		}
+		if predicate["version"] != float64(1) && predicate["version"] != 1 {
+			return nil, fmt.Errorf("ATTESTATION_SCHEMA_UNSUPPORTED: expected version 1")
+		}
 	}
 	attestation := &metadata.Attestation{ArtifactVersionID: artifactVersion.ID, Type: attestationType, Digest: digest, Predicate: predicate, CreatedBy: actor}
 	if err := r.repo.CreateAttestation(ctx, attestation); err != nil {
 		return nil, err
 	}
-	signatureStatus, scanStatus := "", ""
-	if attestationType == "signature" {
-		signatureStatus = "verified"
-	}
-	if attestationType == "scan" {
-		scanStatus = "passed"
-	}
-	_ = r.repo.SetArtifactAttestation(ctx, artifactVersion.ID, signatureStatus, scanStatus)
+	r.deliverWebhookEvent(ctx, namespace, "attestation.added", map[string]interface{}{
+		"attestation_id": attestation.ID, "type": attestationType, "digest": digest,
+		"kind": kind, "namespace": namespace, "name": name, "version": version, "actor": actor,
+	})
 	return attestation, nil
 }
 
@@ -328,25 +346,73 @@ func (r *Registry) deliverWebhookEvent(ctx context.Context, namespace, event str
 		r.logger.Warn("failed to list webhooks", "error", err)
 		return
 	}
-	body, _ := json.Marshal(map[string]interface{}{"event": event, "namespace": namespace, "payload": payload})
+	now := time.Now().UTC()
+	eventID := fmt.Sprintf("%d-%d", now.UnixNano(), time.Now().Nanosecond())
+	eventEnvelope := map[string]interface{}{
+		"schema_version": "1.0",
+		"event_id":       eventID,
+		"event":          event,
+		"namespace":      namespace,
+		"timestamp":      now.Format(time.RFC3339),
+		"payload":        payload,
+	}
+	body, err := json.Marshal(eventEnvelope)
+	if err != nil {
+		r.logger.Error("failed to marshal webhook event", "error", err)
+		return
+	}
+
 	for _, hook := range hooks {
 		if !hook.Active || !containsEvent(hook.Events, event) {
 			continue
 		}
 		go func(hook metadata.Webhook) {
-			request, err := http.NewRequest(http.MethodPost, hook.URL, bytes.NewReader(body))
-			if err != nil {
-				return
+			deliveryID := fmt.Sprintf("del-%d-%s", time.Now().UnixNano(), eventID)
+			timestampStr := fmt.Sprintf("%d", time.Now().Unix())
+			mac := hmac.New(sha256.New, []byte("skillforge-webhook-secret"))
+			mac.Write([]byte(timestampStr + "." + string(body)))
+			signature := hex.EncodeToString(mac.Sum(nil))
+
+			var respCode int
+			var durationMs int64
+			var success bool
+
+			for attempt := 1; attempt <= 3; attempt++ {
+				startTime := time.Now()
+				req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, hook.URL, bytes.NewReader(body))
+				if err != nil {
+					break
+				}
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("X-SkillForge-Event", event)
+				req.Header.Set("X-SkillForge-Delivery-ID", deliveryID)
+				req.Header.Set("X-SkillForge-Timestamp", timestampStr)
+				req.Header.Set("X-SkillForge-Signature", "sha256="+signature)
+
+				client := &http.Client{Timeout: 5 * time.Second}
+				resp, err := client.Do(req)
+				durationMs = time.Since(startTime).Milliseconds()
+				if err == nil {
+					respCode = resp.StatusCode
+					resp.Body.Close()
+					if respCode >= 200 && respCode < 300 {
+						success = true
+						break
+					}
+				} else {
+					respCode = 0
+				}
+				time.Sleep(time.Duration(attempt*100) * time.Millisecond)
 			}
-			request.Header.Set("Content-Type", "application/json")
-			request.Header.Set("X-SkillForge-Event", event)
-			client := &http.Client{Timeout: 5 * time.Second}
-			response, err := client.Do(request)
-			if err != nil {
-				r.logger.Warn("webhook delivery failed", "url", hook.URL, "error", err)
-				return
-			}
-			response.Body.Close()
+
+			_ = r.repo.LogWebhookDelivery(context.Background(), &metadata.WebhookDelivery{
+				WebhookID:  hook.ID,
+				Namespace:  namespace,
+				Event:      event,
+				StatusCode: respCode,
+				DurationMs: durationMs,
+				Success:    success,
+			})
 		}(hook)
 	}
 }

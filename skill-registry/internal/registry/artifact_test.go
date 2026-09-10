@@ -179,19 +179,37 @@ func TestArtifactAttestationsUpdateSignatureAndScanMetadata(t *testing.T) {
 	if _, err := reg.PublishArtifact(ctx, "prompt", "demo", "summary", "1.0.0", data, "tgz", "tester"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.CreateArtifactAttestation(ctx, "prompt", "demo", "summary", "1.0.0", "signature", "sha256:sig", "tester", nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := reg.CreateArtifactAttestation(ctx, "prompt", "demo", "summary", "1.0.0", "scan", "sha256:scan", "tester", nil); err != nil {
-		t.Fatal(err)
-	}
 	version, err := reg.ResolveArtifactVersion(ctx, "prompt", "demo", "summary", "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version.SignatureStatus != "verified" || version.ScanStatus != "passed" {
-		t.Fatalf("unexpected attestation metadata: signature=%s scan=%s", version.SignatureStatus, version.ScanStatus)
+	previousSignature, previousScan := version.SignatureStatus, version.ScanStatus
+	digest := version.DigestSHA256
+	predicate := map[string]interface{}{"version": 1, "subject": map[string]interface{}{"sha256": digest}}
+	for _, typ := range []string{"signature", "scan"} {
+		if _, err := reg.CreateArtifactAttestation(ctx, "prompt", "demo", "summary", "1.0.0", typ, digest, "tester", predicate); err != nil {
+			t.Fatal(err)
+		}
 	}
+	bad := map[string]interface{}{"version": 1, "subject": map[string]interface{}{"sha256": "wrong"}}
+	for _, tc := range []struct {
+		digest    string
+		predicate map[string]interface{}
+	}{
+		{"wrong", predicate}, {digest, bad}, {digest, nil},
+	} {
+		if _, err := reg.CreateArtifactAttestation(ctx, "prompt", "demo", "summary", "1.0.0", "scan", tc.digest, "tester", tc.predicate); err == nil {
+			t.Fatal("accepted unbound evidence")
+		}
+	}
+	version, err = reg.ResolveArtifactVersion(ctx, "prompt", "demo", "summary", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version.SignatureStatus != previousSignature || version.ScanStatus != previousScan {
+		t.Fatalf("storage incorrectly promoted unverified evidence: %+v", version)
+	}
+
 	attestations, err := reg.ListArtifactAttestations(ctx, "prompt", "demo", "summary", "1.0.0")
 	if err != nil {
 		t.Fatal(err)

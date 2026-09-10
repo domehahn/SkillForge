@@ -10,43 +10,140 @@ services:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U skillforge -d skillforge"]
-      interval: 10s
-      timeout: 5s
+      interval: 5s
+      timeout: 3s
       retries: 5
     restart: unless-stopped
 
-  registry:
+  minio:
+    image: minio/minio:RELEASE.2024-01-31T20-20-33Z
+    container_name: skill-registry-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadminpassword
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio-create-bucket:
+    image: minio/mc:RELEASE.2024-01-16T16-06-34Z
+    container_name: skill-registry-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadminpassword;
+      /usr/bin/mc mb myminio/skillforge-blobs --ignore-existing;
+      exit 0;
+      "
+
+  redis:
+    image: redis:7-alpine
+    container_name: skill-registry-redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  registry1:
     build:
       context: ..
       dockerfile: skill-registry/Dockerfile
     image: skill-registry:latest
-    container_name: skill-registry
+    container_name: skill-registry-1
     expose:
       - "8080"
     volumes:
-      - registry-data:/app/data
-      - ./config.yaml:/app/config.yaml:ro
+      - registry-data1:/app/data
     environment:
       - SKILL_REGISTRY_ADDR=:8080
       - SKILL_REGISTRY_DATA_DIR=/app/data
       - SKILL_REGISTRY_DB_DRIVER=postgres
       - SKILL_REGISTRY_DB_DSN=postgres://skillforge:skillforge@postgres:5432/skillforge?sslmode=disable
+      - SKILL_REGISTRY_STORAGE_BACKEND=s3
+      - SKILL_REGISTRY_STORAGE_S3_ENDPOINT=minio:9000
+      - SKILL_REGISTRY_STORAGE_S3_REGION=us-east-1
+      - SKILL_REGISTRY_STORAGE_S3_BUCKET=skillforge-blobs
+      - SKILL_REGISTRY_STORAGE_S3_ACCESS_KEY=minioadmin
+      - SKILL_REGISTRY_STORAGE_S3_SECRET_KEY=minioadminpassword
+      - SKILL_REGISTRY_STORAGE_S3_USE_SSL=false
+      - SKILL_REGISTRY_STORAGE_S3_PATH_STYLE=true
+      - SKILL_REGISTRY_RATE_LIMIT_BACKEND=redis
+      - SKILL_REGISTRY_RATE_LIMIT_REDIS_ADDR=redis:6379
       - SKILL_REGISTRY_AUTH_ENABLED=true
       - SKILL_REGISTRY_INITIAL_ADMIN_USER=admin
       - SKILL_REGISTRY_INITIAL_ADMIN_PASSWORD=changeme
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-create-bucket:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
-      interval: 30s
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  registry2:
+    build:
+      context: ..
+      dockerfile: skill-registry/Dockerfile
+    image: skill-registry:latest
+    container_name: skill-registry-2
+    expose:
+      - "8080"
+    volumes:
+      - registry-data2:/app/data
+    environment:
+      - SKILL_REGISTRY_ADDR=:8080
+      - SKILL_REGISTRY_DATA_DIR=/app/data
+      - SKILL_REGISTRY_DB_DRIVER=postgres
+      - SKILL_REGISTRY_DB_DSN=postgres://skillforge:skillforge@postgres:5432/skillforge?sslmode=disable
+      - SKILL_REGISTRY_STORAGE_BACKEND=s3
+      - SKILL_REGISTRY_STORAGE_S3_ENDPOINT=minio:9000
+      - SKILL_REGISTRY_STORAGE_S3_REGION=us-east-1
+      - SKILL_REGISTRY_STORAGE_S3_BUCKET=skillforge-blobs
+      - SKILL_REGISTRY_STORAGE_S3_ACCESS_KEY=minioadmin
+      - SKILL_REGISTRY_STORAGE_S3_SECRET_KEY=minioadminpassword
+      - SKILL_REGISTRY_STORAGE_S3_USE_SSL=false
+      - SKILL_REGISTRY_STORAGE_S3_PATH_STYLE=true
+      - SKILL_REGISTRY_RATE_LIMIT_BACKEND=redis
+      - SKILL_REGISTRY_RATE_LIMIT_REDIS_ADDR=redis:6379
+      - SKILL_REGISTRY_AUTH_ENABLED=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-create-bucket:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 10s
       timeout: 3s
       retries: 3
       start_period: 5s
 
   nginx:
-    image: nginx:alpine
+    image: nginx:1.25-alpine
     container_name: skill-registry-nginx
     ports:
       - "8082:80"
@@ -54,12 +151,18 @@ services:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./certs:/etc/nginx/certs:ro
     depends_on:
-      registry:
+      registry1:
+        condition: service_healthy
+      registry2:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  registry-data:
+  registry-data1:
+    driver: local
+  registry-data2:
     driver: local
   postgres-data:
+    driver: local
+  minio-data:
     driver: local

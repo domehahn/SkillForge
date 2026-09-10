@@ -105,7 +105,7 @@ func (s *S3Storage) StoreArtifact(kind, namespace, name, version string, data []
 	return digest, nil
 }
 
-// Retrieve reads back stored data by its SHA-256 digest.
+// Retrieve reads back stored data by its SHA-256 digest and verifies payload integrity.
 func (s *S3Storage) Retrieve(digest string) ([]byte, error) {
 	rc, err := s.RetrieveReader(digest)
 	if err != nil {
@@ -116,10 +116,15 @@ func (s *S3Storage) Retrieve(digest string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read package: %w", err)
 	}
+	hash := sha256.Sum256(data)
+	actual := hex.EncodeToString(hash[:])
+	if actual != digest {
+		return nil, fmt.Errorf("%w: expected %s, got %s", ErrCorruptBlob, digest, actual)
+	}
 	return data, nil
 }
 
-// RetrieveReader is Retrieve without buffering the whole blob in memory.
+// RetrieveReader is Retrieve without buffering the whole blob in memory, wrapping object with on-the-fly digest verification.
 func (s *S3Storage) RetrieveReader(digest string) (io.ReadCloser, error) {
 	obj, err := s.client.GetObject(context.Background(), s.bucket, s.blobKey(digest), minio.GetObjectOptions{})
 	if err != nil {
@@ -135,7 +140,7 @@ func (s *S3Storage) RetrieveReader(digest string) (io.ReadCloser, error) {
 		}
 		return nil, fmt.Errorf("stat object: %w", err)
 	}
-	return obj, nil
+	return newDigestVerifyingReader(obj, digest), nil
 }
 
 // Delete removes a stored blob by digest.
