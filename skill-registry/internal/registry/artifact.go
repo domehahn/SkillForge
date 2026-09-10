@@ -248,7 +248,8 @@ func (r *Registry) CreateArtifactAttestation(ctx context.Context, kind, namespac
 	if attestationType == "" {
 		return nil, fmt.Errorf("attestation type must not be empty")
 	}
-	if digest != artifactVersion.DigestSHA256 || len(digest) != 64 {
+	cleanDigest := strings.TrimPrefix(digest, "sha256:")
+	if cleanDigest != artifactVersion.DigestSHA256 || len(cleanDigest) != 64 {
 		return nil, fmt.Errorf("ATTESTATION_DIGEST_MISMATCH: evidence must reference the published artifact")
 	}
 	if len(predicate) == 0 {
@@ -260,14 +261,14 @@ func (r *Registry) CreateArtifactAttestation(ctx context.Context, kind, namespac
 	}
 	if attestationType == "scan" {
 		subject, ok := predicate["subject"].(map[string]interface{})
-		if !ok || subject["sha256"] != digest {
+		if !ok || strings.TrimPrefix(fmt.Sprintf("%v", subject["sha256"]), "sha256:") != cleanDigest {
 			return nil, fmt.Errorf("ATTESTATION_SUBJECT_MISMATCH: predicate does not identify the published artifact")
 		}
 		if predicate["version"] != float64(1) && predicate["version"] != 1 {
 			return nil, fmt.Errorf("ATTESTATION_SCHEMA_UNSUPPORTED: expected version 1")
 		}
 	}
-	attestation := &metadata.Attestation{ArtifactVersionID: artifactVersion.ID, Type: attestationType, Digest: digest, Predicate: predicate, CreatedBy: actor}
+	attestation := &metadata.Attestation{ArtifactVersionID: artifactVersion.ID, Type: attestationType, Digest: cleanDigest, Predicate: predicate, CreatedBy: actor}
 	if err := r.repo.CreateAttestation(ctx, attestation); err != nil {
 		return nil, err
 	}
