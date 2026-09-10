@@ -155,6 +155,7 @@ func main() {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Start server in a goroutine
@@ -182,6 +183,7 @@ func main() {
 			redirect := &http.Server{
 				Addr:              httpAddr,
 				ReadHeaderTimeout: 10 * time.Second,
+				MaxHeaderBytes:    1 << 20,
 				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					target := "https://" + r.Host + r.URL.RequestURI()
 					http.Redirect(w, r, target, http.StatusMovedPermanently)

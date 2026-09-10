@@ -492,6 +492,15 @@ func (cfg *Config) Validate() error {
 // ProductionIssues returns configuration gaps that matter for production operation.
 func (cfg *Config) ProductionIssues() []string {
 	var issues []string
+	if cfg.Database.Driver == "sqlite" || cfg.Database.Driver == "" {
+		issues = append(issues, "database.driver 'sqlite' is not permitted in production mode; 'postgres' is required for HA")
+	}
+	if cfg.Storage.Backend == "filesystem" || cfg.Storage.Backend == "" {
+		issues = append(issues, "storage.backend 'filesystem' is not permitted in production mode; 's3' is required for HA")
+	}
+	if cfg.RateLimit.Backend == "memory" || cfg.RateLimit.Backend == "" {
+		issues = append(issues, "rate_limit.backend 'memory' is not permitted in production mode; 'redis' is required for HA")
+	}
 	if !cfg.Auth.Enabled {
 		issues = append(issues, "auth.enabled must be true")
 	}
@@ -501,11 +510,11 @@ func (cfg *Config) ProductionIssues() []string {
 	if !cfg.Security.HeadersEnabled {
 		issues = append(issues, "security.headers_enabled must be true")
 	}
-	if cfg.Security.OpenAPICORSOrigin == "*" {
-		issues = append(issues, "security.openapi_cors_origin should be restricted from '*'")
+	if cfg.Security.OpenAPICORSOrigin == "*" || cfg.Security.OpenAPICORSOrigin == "" {
+		issues = append(issues, "security.openapi_cors_origin must be explicitly set and not '*'")
 	}
-	if !cfg.TLS.Enabled && !cfg.TLS.HTTPRedirect {
-		issues = append(issues, "tls.enabled or a trusted TLS-terminating proxy must be configured")
+	if !cfg.TLS.Enabled && len(cfg.Security.TrustedProxies) == 0 {
+		issues = append(issues, "tls.enabled or trusted proxy configuration (security.trusted_proxies) must be specified")
 	}
 	if !cfg.RateLimit.Enabled {
 		issues = append(issues, "rate_limit.enabled must be true")
@@ -519,13 +528,13 @@ func (cfg *Config) ProductionIssues() []string {
 	return issues
 }
 
-// ValidateProduction returns an error when production enforcement is enabled and gaps remain.
+// ValidateProduction returns an error when production mode or enforcement is enabled and gaps remain.
 func (cfg *Config) ValidateProduction() error {
 	if !cfg.Production.Mode && !cfg.Production.Enforce {
 		return nil
 	}
 	issues := cfg.ProductionIssues()
-	if cfg.Production.Enforce && len(issues) > 0 {
+	if len(issues) > 0 {
 		return fmt.Errorf("production readiness check failed: %s", strings.Join(issues, "; "))
 	}
 	return nil

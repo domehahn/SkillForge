@@ -1,0 +1,15 @@
+data/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.log
+.DS_Store
+.agents/
+.claude/
+.agentic/
+skill-registry/bin/
+skill-registry/data/
+skill-registry/certs/*.pem
+skill-registry/certs/*.key
+skill-registry/certs/*.crt

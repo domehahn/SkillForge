@@ -93,6 +93,12 @@ components:
       type: object
       properties:
         error:
+          type: string
+          example: Artifact not found
+        code:
+          type: string
+          example: NOT_FOUND
+        detail:
           type: object
           properties:
             code:
@@ -101,6 +107,11 @@ components:
             message:
               type: string
               example: Artifact not found
+            details:
+              type: array
+              items:
+                type: string
+              example: ["Artifact br-ns/br-skill version 1.0.0 was not found"]
 
     Artifact:
       type: object

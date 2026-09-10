@@ -482,6 +482,36 @@ func (v *Validator) validatePath(path string) error {
 }
 
 func ParseSkillManifest(content []byte) (*spec.Skill, error) {
+	var root map[string]yaml.Node
+	if err := yaml.Unmarshal(content, &root); err != nil {
+		return nil, err
+	}
+	if _, native := root["skill"]; native {
+		var doc struct {
+			Version int `yaml:"version"`
+			Skill   struct {
+				Name        string `yaml:"name"`
+				Version     string `yaml:"version"`
+				Description string `yaml:"description"`
+			} `yaml:"skill"`
+			Entrypoint    string `yaml:"entrypoint"`
+			Compatibility struct {
+				Platforms []spec.Platform `yaml:"platforms"`
+			} `yaml:"compatibility"`
+		}
+		if err := yaml.Unmarshal(content, &doc); err != nil {
+			return nil, err
+		}
+		if doc.Version != 1 {
+			return nil, fmt.Errorf("unsupported native skil schema version %d", doc.Version)
+		}
+		if _, ambiguous := root["name"]; ambiguous {
+			return nil, fmt.Errorf("ambiguous native and legacy identity")
+		}
+		result := &spec.Skill{Name: doc.Skill.Name, Version: doc.Skill.Version, Description: doc.Skill.Description, Entrypoint: doc.Entrypoint, CompatibleWith: doc.Compatibility.Platforms}
+		normalizeSkill(result)
+		return result, nil
+	}
 	var s spec.Skill
 	if err := yaml.Unmarshal(content, &s); err != nil {
 		return nil, err

@@ -449,11 +449,14 @@ func (h *Handler) UnyankVersion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) governVersion(w http.ResponseWriter, r *http.Request, action string) {
+	namespace := chi.URLParam(r, "namespace")
+	if !h.requireNamespaceRole(w, r, namespace, "maintainer") {
+		return
+	}
 	var body struct {
 		Reason string `json:"reason"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
-	namespace := chi.URLParam(r, "namespace")
 	name := chi.URLParam(r, "name")
 	version := chi.URLParam(r, "version")
 	actor := auth.ActorFromContext(r.Context())

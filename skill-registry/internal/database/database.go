@@ -63,4 +63,5 @@ func configurePostgres(db *sql.DB) {
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(time.Hour)
+	db.SetConnMaxIdleTime(15 * time.Minute)
 }
