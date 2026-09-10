@@ -204,6 +204,14 @@ func (r *Registry) Ping(ctx context.Context) error {
 	return r.repo.Ping(ctx)
 }
 
+// StoragePing checks that the storage backend is reachable.
+func (r *Registry) StoragePing(ctx context.Context) error {
+	if r.storage == nil {
+		return fmt.Errorf("storage backend is nil")
+	}
+	return r.storage.Ping(ctx)
+}
+
 func (r *Registry) calculateLatest(ctx context.Context, namespace, name, candidate string) (string, error) {
 	skill, err := r.repo.GetSkill(ctx, namespace, name)
 	if err != nil || skill == nil {

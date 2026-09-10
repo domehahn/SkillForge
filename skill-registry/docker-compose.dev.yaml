@@ -1,0 +1,24 @@
+services:
+  registry:
+    build:
+      context: ..
+      dockerfile: skill-registry/Dockerfile
+    image: skill-registry:dev
+    container_name: skill-registry-dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./config.example.dev.yaml:/app/config.yaml:ro
+    environment:
+      - SKILL_REGISTRY_ADDR=:8080
+      - SKILL_REGISTRY_DATA_DIR=/app/data
+      - SKILL_REGISTRY_AUTH_ENABLED=true
+      - SKILL_REGISTRY_INITIAL_ADMIN_USER=admin
+      - SKILL_REGISTRY_INITIAL_ADMIN_PASSWORD=changeme
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

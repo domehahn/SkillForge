@@ -47,7 +47,11 @@ func (r *Repository) Ping(ctx context.Context) error {
 
 // Close closes the database connection
 func (r *Repository) Close() error {
-	return r.db.Close()
+	if r.db != nil {
+		_, _ = r.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+		return r.db.Close()
+	}
+	return nil
 }
 
 // GetDB returns the database connection

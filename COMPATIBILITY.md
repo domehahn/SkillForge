@@ -9,11 +9,9 @@ uses the event commit (including PR merge contents); its sibling uses main
 or an explicit stable release. Exact checkout SHAs are retained as artifacts.
 No cross-repository write token or repository_dispatch secret is required.
 
-Supported stable baselines: skil **v0.6.0**, skpm **v2.3.0** (GitHub latest
-release lookup on 2026-09-09). SkillForge has **no stable release** at that
-lookup; stable SkillForge compatibility is unavailable, not PASS. Add its
-first supported release as an additional matrix cell before claiming readiness.
-A fixed historical SkillForge commit is not called current.
+Supported stable baselines: skil **v0.6.0**, skpm **v2.3.0**, SkillForge **v1.0.0**.
+SkillForge stable compatibility matrix cells (`skpm current × SkillForge v1.0.0` and
+`skpm v2.3.0 × SkillForge v1.0.0`) are configured in `.github/workflows/toolchain.yml`.
 
 Each producer runs its consumers: skil PRs compile skcr fixtures and run
 skpm's signature verifier; SkillForge PRs run current and stable skpm.

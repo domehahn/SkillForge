@@ -23,19 +23,21 @@ import (
 	"github.com/skillforge/skill-registry/internal/email"
 	"github.com/skillforge/skill-registry/internal/metadata"
 	"github.com/skillforge/skill-registry/internal/observability"
+	"github.com/skillforge/skill-registry/internal/ratelimit"
 	"github.com/skillforge/skill-registry/internal/registry"
 	"github.com/skillforge/skill-registry/internal/validation"
 )
 
 // Handler handles HTTP requests
 type Handler struct {
-	registry  *registry.Registry
-	auth      *auth.Authenticator
-	audit     *audit.Repository // may be nil; no audit logging when nil
-	logger    *slog.Logger
-	config    *config.Config
-	email     *email.Sender
-	clientIPs *clientip.Resolver
+	registry         *registry.Registry
+	auth             *auth.Authenticator
+	audit            *audit.Repository // may be nil; no audit logging when nil
+	logger           *slog.Logger
+	config           *config.Config
+	email            *email.Sender
+	clientIPs        *clientip.Resolver
+	rateLimitBackend ratelimit.Backend
 }
 
 // NewHandler creates a new API handler. auditRepo may be nil to disable audit logging.
@@ -235,14 +237,50 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ReadyCheck handles readiness check requests
+func (h *Handler) SetRateLimitBackend(backend ratelimit.Backend) {
+	h.rateLimitBackend = backend
+}
+
+// ReadyCheck handles readiness check requests, probing DB, Storage, and Rate Limiter
 func (h *Handler) ReadyCheck(w http.ResponseWriter, r *http.Request) {
-	if err := h.registry.Ping(r.Context()); err != nil {
+	ctx := r.Context()
+	details := make(map[string]string)
+	failed := false
+
+	if err := h.registry.Ping(ctx); err != nil {
 		h.logger.Error("readyz: db ping failed", "error", err)
-		WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not ready", "error": "database unavailable"})
+		details["database"] = err.Error()
+		failed = true
+	} else {
+		details["database"] = "ok"
+	}
+
+	if err := h.registry.StoragePing(ctx); err != nil {
+		h.logger.Error("readyz: storage ping failed", "error", err)
+		details["storage"] = err.Error()
+		failed = true
+	} else {
+		details["storage"] = "ok"
+	}
+
+	if h.rateLimitBackend != nil {
+		if err := h.rateLimitBackend.Ping(ctx); err != nil {
+			h.logger.Error("readyz: ratelimit ping failed", "error", err)
+			details["ratelimit"] = err.Error()
+			failed = true
+		} else {
+			details["ratelimit"] = "ok"
+		}
+	}
+
+	if failed {
+		details["status"] = "not ready"
+		WriteJSON(w, http.StatusServiceUnavailable, details)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+
+	details["status"] = "ready"
+	WriteJSON(w, http.StatusOK, details)
 }
 
 // GetMetadata returns registry metadata

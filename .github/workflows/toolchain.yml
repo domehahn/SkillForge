@@ -25,20 +25,28 @@ jobs:
             provider: SkillForge
             consumer_ref: v2.3.0
             provider_ref: main
+          - consumer: skpm
+            provider: SkillForge
+            consumer_ref: main
+            provider_ref: v1.0.0
+          - consumer: skpm
+            provider: SkillForge
+            consumer_ref: v2.3.0
+            provider_ref: v1.0.0
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
         with:
           repository: domehahn/${{ matrix.consumer }}
           ref: ${{ matrix.consumer == 'SkillForge' && github.sha || matrix.consumer_ref }}
           path: ${{ matrix.consumer }}
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
         with:
           repository: domehahn/${{ matrix.provider }}
           ref: ${{ matrix.provider == 'SkillForge' && github.sha || matrix.provider_ref }}
           path: ${{ matrix.provider }}
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
         with:
           go-version: '1.26.6'
           cache: false
@@ -73,7 +81,7 @@ jobs:
             # Build first: even older consumer tests cannot turn build failure into a skip.
             (cd skpm && (go test -count=1 -timeout 3m -tags e2e ./tests/integration/... -run TestSkillForgeE2E -v 2>/dev/null || go test -count=1 -timeout 3m -tags e2e ./... -run TestSkillForgeE2E -v))
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         if: always()
         with:
           name: revisions-${{ matrix.consumer }}-${{ matrix.provider }}-${{ matrix.consumer_ref }}-${{ matrix.provider_ref }}
