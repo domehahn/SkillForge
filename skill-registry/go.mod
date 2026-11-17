@@ -4,7 +4,7 @@ go 1.27.4
 
 require (
 	github.com/domehahn/sklib v0.3.0
-	github.com/go-chi/chi/v5 v5.3.0
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/lib/pq v1.12.3
 	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/minio/minio-go/v7 v7.3.0
