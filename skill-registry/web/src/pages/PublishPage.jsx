@@ -179,6 +179,14 @@ const KINDS = [
     desc: 'A curated collection of related skills, agents, or tools distributed together. Use for starter kits or org-wide toolsets.',
     when: 'When you want to distribute a cohesive set of artifacts as one unit.',
   },
+  { kind: 'mcp', icon: '🔌', title: 'MCP Server', desc: 'A versioned Model Context Protocol server definition.', when: 'When agents need a governed local or remote tool server.' },
+  { kind: 'instructions', icon: '📄', title: 'Instructions', desc: 'AGENTS.md and platform instruction bundles with explicit target paths.', when: 'When teams share repository or directory agent guidance.' },
+  { kind: 'hook', icon: '⚓', title: 'Hook', desc: 'A reviewed lifecycle hook with sandbox and approval metadata.', when: 'When a trusted runtime should run a bounded lifecycle action.' },
+  { kind: 'plugin', icon: '🧩', title: 'Plugin', desc: 'A signed, versioned external agent adapter.', when: 'When connecting an independently packaged agent runtime.' },
+  { kind: 'policy', icon: '🛡', title: 'Policy', desc: 'A fail-closed policy bundle for tools and runtime admission.', when: 'When reusable policy needs review and version history.' },
+  { kind: 'container', icon: '📦', title: 'Container', desc: 'A digest-pinned OCI image descriptor and runtime constraints.', when: 'When distributing an approved local component image.' },
+  { kind: 'model-runtime', icon: '🧠', title: 'Model Runtime', desc: 'A digest-pinned Ollama, vLLM, llama.cpp, or compatible runtime.', when: 'When describing a local inference service.' },
+  { kind: 'model-profile', icon: '🗂', title: 'Model Profile', desc: 'A named model, license, quantization, and runtime reference.', when: 'When pinning a model profile to a runtime version.' },
 ]
 
 export default function PublishPage() {

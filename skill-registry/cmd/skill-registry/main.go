@@ -71,6 +71,7 @@ func main() {
 
 	// Initialize registry
 	reg := registry.NewRegistry(repo, store, validator, logger)
+	reg.SetWebhookSigningKey(cfg.Security.WebhookSigningKey)
 
 	// Initialize authenticator
 	authenticator, err := auth.NewAuthenticatorWithBcryptCost(cfg.Auth.Enabled, repo.GetDB(), cfg.Auth.BcryptCost)

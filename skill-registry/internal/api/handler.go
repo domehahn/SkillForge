@@ -110,6 +110,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Get("/skills/{namespace}/{name}/dist-tags", h.ListDistTags)
 			r.Get("/skills/{namespace}/{name}/versions/{version}", h.GetVersion)
 			r.Get("/skills/{namespace}/{name}/versions/{version}/download", h.Download)
+			r.Get("/activations", h.ListActivations)
+			r.Get("/activations/{kind}/{namespace}/{name}", h.GetActivation)
 		})
 
 		// Token management — scoped individually so each operation requires its own scope.
@@ -188,6 +190,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Post("/namespaces/{namespace}/webhooks/{id}/test", h.TestWebhook)
 			r.Get("/namespaces/{namespace}/webhooks/{id}/deliveries", h.ListWebhookDeliveries)
 			r.Put("/namespaces/{namespace}/pinned", h.SetPinned)
+			r.Post("/activations/{kind}/{namespace}/{name}/actions", h.ChangeActivation)
+			r.Put("/activations/{kind}/{namespace}/{name}/status", h.ReportActivation)
 		})
 
 		// Namespace admin endpoints (require namespace:admin scope)
@@ -296,7 +300,8 @@ func (h *Handler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 		SupportedPackageTypes: h.config.Storage.AllowedPackageTypes,
 		AuthMode:              authMode,
 		Capabilities: []string{
-			"artifacts", "skills", "agents", "flows", "prompts", "tools", "bundles",
+			"artifacts", "skills", "agents", "flows", "prompts", "tools", "bundles", "mcp",
+			"instructions", "hooks", "plugins", "policies", "containers", "model-runtimes", "model-profiles", "activations",
 			"dependencies", "lockfiles", "graphs", "promotions", "namespace-acls",
 			"webhooks", "attestations", "oci-descriptors", "immutable-versions",
 		},

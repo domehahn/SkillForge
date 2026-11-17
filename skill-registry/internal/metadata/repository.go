@@ -201,13 +201,52 @@ func (r *Repository) migrate() error {
 	}); err != nil {
 		return err
 	}
-	return dbmigrate.Run(r.db, "meta_014_follows", func(tx *sql.Tx) error {
+	if err := dbmigrate.Run(r.db, "meta_014_follows", func(tx *sql.Tx) error {
 		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS namespace_follows (
 			follower TEXT NOT NULL,
 			namespace TEXT NOT NULL,
 			created_at DATETIME NOT NULL,
 			PRIMARY KEY (follower, namespace)
 		)`)
+		return err
+	}); err != nil {
+		return err
+	}
+	return dbmigrate.Run(r.db, "meta_015_activations", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS artifact_activations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			namespace TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			name TEXT NOT NULL,
+			version TEXT NOT NULL,
+			previous_version TEXT NOT NULL DEFAULT '',
+			desired_state TEXT NOT NULL DEFAULT 'discovered',
+			observed_state TEXT NOT NULL DEFAULT 'discovered',
+			generation INTEGER NOT NULL DEFAULT 1,
+			approved_by TEXT NOT NULL DEFAULT '',
+			approved_at DATETIME,
+			reason TEXT NOT NULL DEFAULT '',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_by TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(namespace, kind, name)
+		);
+		CREATE TABLE IF NOT EXISTS activation_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			activation_id INTEGER NOT NULL,
+			generation INTEGER NOT NULL,
+			action TEXT NOT NULL,
+			actor TEXT NOT NULL DEFAULT '',
+			from_state TEXT NOT NULL DEFAULT '',
+			to_state TEXT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			FOREIGN KEY (activation_id) REFERENCES artifact_activations(id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_activations_namespace ON artifact_activations(namespace, kind, name);
+		CREATE INDEX IF NOT EXISTS idx_activation_events ON activation_events(activation_id, generation);
+		`)
 		return err
 	})
 }

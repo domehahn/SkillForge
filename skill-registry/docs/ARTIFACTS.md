@@ -10,6 +10,14 @@ Supported kinds:
 - `prompt`
 - `tool`
 - `bundle`
+- `mcp`, `instructions`, `hook`, `plugin`, `policy`, `container`
+- `model-runtime`, `model-profile`
+
+Executable kinds use `skillforge.dev/v2`. Publishing stores and validates
+artifacts but never executes them. Runtime activation follows an audited
+`install → approve → activate` desired-state workflow; a separate controller
+reconciles containers and reports health. Image references must include a
+SHA-256 digest. Credentials use `secret_refs`, not literal environment values.
 
 ## Manifest
 
@@ -58,3 +66,23 @@ skforge webhook add demo https://example.com/hook artifact.published,artifact.pr
 Namespace memberships use `reader`, `maintainer`, and `owner` roles. Webhook registrations, promotion history, signature status, scan status, and OCI-compatible descriptors are stored alongside artifact metadata.
 
 Webhook delivery currently emits JSON payloads for `artifact.published` and `artifact.promoted` with an `X-SkillForge-Event` header.
+
+## Local runtimes
+
+An optional local profile starts an OCI registry, Ollama and an
+OpenAI-compatible LiteLLM gateway. It downloads no model automatically:
+
+```bash
+docker compose --profile local-runtime up -d oci-registry ollama model-gateway
+```
+
+The endpoints bind to loopback at ports 5001, 11434 and 4000 by default.
+The registry application does not start containers or mount the Docker socket.
+
+## Activation API
+
+`GET /api/v1/activations?namespace=team` lists desired state. Maintainers use
+`POST /api/v1/activations/{kind}/{namespace}/{name}/actions` with
+`{"action":"install","version":"1.0.0"}`, then `approve`, `activate`,
+`disable` or `rollback`. A controller reports observed state to the matching
+`/status` endpoint with its current generation; stale reports are rejected.

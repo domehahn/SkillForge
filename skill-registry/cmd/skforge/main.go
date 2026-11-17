@@ -820,6 +820,9 @@ func artifactInitCommand() {
 	entrypoints := map[string]string{
 		"skill": "SKILL.md", "agent": "AGENT.md", "flow": "FLOW.yaml",
 		"prompt": "PROMPT.md", "tool": "TOOL.md", "bundle": "BUNDLE.md",
+		"mcp": "mcp.yaml", "instructions": "AGENTS.md", "hook": "hook.yaml",
+		"plugin": "plugin.yaml", "policy": "policy.rego", "container": "container.yaml",
+		"model-runtime": "runtime.yaml", "model-profile": "model.yaml",
 	}
 	entrypoint, ok := entrypoints[kind]
 	if !ok {
@@ -831,7 +834,11 @@ func artifactInitCommand() {
 		os.Exit(1)
 	}
 	name := filepath.Base(filepath.Clean(dir))
-	manifest := fmt.Sprintf("apiVersion: skillforge.dev/v1\nkind: %s\nmetadata:\n  namespace: default\n  name: %s\n  version: 0.1.0\n  description: %s artifact\nspec:\n  entrypoint: %s\n  dependencies: []\n", kind, name, kind, entrypoint)
+	apiVersion := "skillforge.dev/v1"
+	if kind == "mcp" || kind == "hook" || kind == "plugin" || kind == "container" || kind == "model-runtime" || kind == "model-profile" {
+		apiVersion = "skillforge.dev/v2"
+	}
+	manifest := fmt.Sprintf("apiVersion: %s\nkind: %s\nmetadata:\n  namespace: default\n  name: %s\n  version: 0.1.0\n  description: %s artifact\nspec:\n  entrypoint: %s\n  dependencies: []\n", apiVersion, kind, name, kind, entrypoint)
 	if err := os.WriteFile(filepath.Join(dir, "artifact.yaml"), []byte(manifest), 0644); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

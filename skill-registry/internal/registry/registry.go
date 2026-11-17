@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -25,10 +26,11 @@ func compatibleMap(s *spec.Skill) map[string]string {
 
 // Registry orchestrates skill publishing and retrieval
 type Registry struct {
-	repo      *metadata.Repository
-	storage   storage.Backend
-	validator *validation.Validator
-	logger    *slog.Logger
+	repo              *metadata.Repository
+	storage           storage.Backend
+	validator         *validation.Validator
+	logger            *slog.Logger
+	webhookSigningKey []byte
 }
 
 // NewRegistry creates a new registry instance. storage may be either
@@ -36,12 +38,29 @@ type Registry struct {
 // (S3-compatible, shared across replicas) — anything satisfying
 // storage.Backend.
 func NewRegistry(repo *metadata.Repository, storage storage.Backend, validator *validation.Validator, logger *slog.Logger) *Registry {
-	return &Registry{
-		repo:      repo,
-		storage:   storage,
-		validator: validator,
-		logger:    logger,
+	ephemeralKey := make([]byte, 32)
+	if _, err := rand.Read(ephemeralKey); err != nil {
+		ephemeralKey = []byte(fmt.Sprintf("ephemeral-%d", time.Now().UnixNano()))
 	}
+	return &Registry{
+		repo:              repo,
+		storage:           storage,
+		validator:         validator,
+		logger:            logger,
+		webhookSigningKey: ephemeralKey,
+	}
+}
+
+// SetWebhookSigningKey configures stable deployment-owned webhook key material.
+// When unset, NewRegistry uses a random process-local key suitable only for local development.
+func (r *Registry) SetWebhookSigningKey(key string) {
+	if key != "" {
+		r.webhookSigningKey = []byte(key)
+	}
+}
+
+func (r *Registry) HasStableWebhookSigningKey() bool {
+	return len(r.webhookSigningKey) >= 32
 }
 
 // PublishOptions contains options for publishing a skill

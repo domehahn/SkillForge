@@ -342,6 +342,10 @@ func (r *Registry) ListWebhooks(ctx context.Context, namespace string) ([]metada
 }
 
 func (r *Registry) deliverWebhookEvent(ctx context.Context, namespace, event string, payload interface{}) {
+	if !r.HasStableWebhookSigningKey() {
+		r.logger.Warn("webhook delivery skipped: configure SKILL_REGISTRY_WEBHOOK_SIGNING_KEY")
+		return
+	}
 	hooks, err := r.repo.ListWebhooks(ctx, namespace)
 	if err != nil {
 		r.logger.Warn("failed to list webhooks", "error", err)
@@ -370,7 +374,7 @@ func (r *Registry) deliverWebhookEvent(ctx context.Context, namespace, event str
 		go func(hook metadata.Webhook) {
 			deliveryID := fmt.Sprintf("del-%d-%s", time.Now().UnixNano(), eventID)
 			timestampStr := fmt.Sprintf("%d", time.Now().Unix())
-			mac := hmac.New(sha256.New, []byte("skillforge-webhook-secret"))
+			mac := hmac.New(sha256.New, r.webhookSigningKey)
 			mac.Write([]byte(timestampStr + "." + string(body)))
 			signature := hex.EncodeToString(mac.Sum(nil))
 
