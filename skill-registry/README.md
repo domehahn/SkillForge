@@ -1,10 +1,10 @@
 # SkillForge Registry
 
-SkillForge Registry is the server, REST API, Web UI, and `skforge` CLI for a self-hosted AI Agent Skill registry.
+SkillForge Registry is the server, REST API, Web UI, and `skforge` CLI for a self-hosted registry of versioned AI development assets.
 
-SkillForge is deliberately registry-shaped: close to Verdaccio, npm Registry, and Docker Hub, but focused on versioned AI agent artifacts. It stores immutable skill packages, validates canonical metadata, tracks digests, exposes discovery APIs, supports lifecycle governance, and installs through lockfiles.
+SkillForge stores immutable packages, validates metadata, tracks digests, exposes discovery APIs, and supports lifecycle governance. Supported artifact kinds include skills, agents, flows, prompts, tools, bundles, MCP servers, instruction files, hooks, plugins, policies, containers, and local model runtime/profile definitions. Publishing stores and validates executable artifacts; runtime activation records audited desired state. A separate controller is required to start and supervise workloads.
 
-Use `skcr` to scaffold skills or render local project structures. Use SkillForge/`skforge` to package, publish, discover, install, pin, verify, deprecate, yank, and govern skill artifacts.
+Use `skcr` to scaffold skills or render local project structures. Use SkillForge/`skforge` to publish, discover, and govern artifacts. Consumer installation and lockfile workflows belong to `skpm`.
 
 ## Versioning Model
 

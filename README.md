@@ -1,11 +1,11 @@
 # SkillForge
 
-[![CI](https://github.com/YOUR_ORG/SkillForge/workflows/skill-registry/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/skill-registry.yml)
-[![Frontend](https://github.com/YOUR_ORG/SkillForge/workflows/frontend/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/frontend.yml)
-[![Integration Tests](https://github.com/YOUR_ORG/SkillForge/workflows/integration-tests/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/integration-tests.yml)
-[![CodeQL](https://github.com/YOUR_ORG/SkillForge/workflows/codeql/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/codeql.yml)
+[![Registry CI](https://github.com/domehahn/SkillForge/actions/workflows/skill-registry.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/skill-registry.yml)
+[![Frontend CI](https://github.com/domehahn/SkillForge/actions/workflows/frontend.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/frontend.yml)
+[![Integration Tests](https://github.com/domehahn/SkillForge/actions/workflows/integration-tests.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/integration-tests.yml)
+[![CodeQL](https://github.com/domehahn/SkillForge/actions/workflows/codeql.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/codeql.yml)
 
-SkillForge is a self-hosted registry server for immutable AI Agent Skill artifacts.
+SkillForge is a self-hosted registry for versioned AI development assets. It stores immutable packages, validates manifests, tracks dependency graphs and digests, and provides namespace governance and audit history.
 
 Use `skcr` to scaffold and render local agent/project structures.
 Use `skpm` to validate, package, publish, install, lock, update, and verify skills.
@@ -13,16 +13,50 @@ Use `skil` to scan skills for security issues and produce attestable evidence.
 Use SkillForge as the self-hosted registry server for immutable skill artifacts.
 Use `skforge` for SkillForge-specific administration, governance, and debugging.
 
-This repository contains `skill-registry/`, the registry server implementation:
+The registry supports skills, agents, workflows, prompts, tools, bundles, MCP servers, instruction files, hooks, plugins, policies, containers, and local model runtime/profile definitions. Runtime activation is represented as audited desired state; a separate controller is responsible for starting and supervising workloads.
+
+This repository contains `skill-registry/`, the registry server, CLI, API, and web application:
 
 - registry server
 - REST API
 - Web UI
 - `skforge` admin CLI
-- content-addressable package storage
-- SQLite metadata
+- content-addressable filesystem or S3-compatible package storage
+- SQLite or PostgreSQL metadata
 - token authentication
 - governance workflows (deprecate, yank, unyank, delete)
+
+## Quick start
+
+```bash
+cd skill-registry
+make build
+./bin/skill-registry
+```
+
+The server listens on `http://localhost:8080` by default. Check readiness with
+`curl http://localhost:8080/readyz`. For a containerized setup, see
+[`skill-registry/README.md`](skill-registry/README.md#docker).
+
+## Project map
+
+| Path | Purpose |
+| --- | --- |
+| `skill-registry/internal/api` | HTTP routes, handlers, OpenAPI contract |
+| `skill-registry/internal/registry` | Artifact lifecycle and policy decisions |
+| `skill-registry/internal/metadata` | Persistence models and repository |
+| `skill-registry/internal/storage` | Filesystem and S3-compatible package storage |
+| `skill-registry/web` | React/Vite registry interface |
+| `skill-registry/cmd` | Registry server and `skforge` CLI |
+| `.github/workflows` | CI, security, integration, and release workflows |
+
+## Project documentation
+
+- [Registry setup and CLI](skill-registry/README.md)
+- [Artifact formats and lifecycle](skill-registry/docs/ARTIFACTS.md)
+- [Backup and restore](skill-registry/docs/BACKUP_RESTORE.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security reporting](SECURITY.md)
 
 ## Responsibility Boundary
 

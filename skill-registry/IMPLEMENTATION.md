@@ -11,11 +11,15 @@ skill-registry/
 │   ├── api/              # HTTP handlers, routing, response DTOs
 │   ├── auth/             # Token authentication + scope middleware
 │   ├── config/           # YAML config + env overrides
-│   ├── metadata/         # SQLite models, repository, SkillManifestFromSpec mapper
+│   ├── metadata/         # Persistence models and repositories
+│   ├── database/         # SQLite/PostgreSQL driver setup
+│   ├── dbmigrate/        # Database migrations
 │   ├── observability/    # slog structured logging, request-ID middleware
 │   ├── packaging/        # Skill package builder (tgz/zip → spec.PackageManifest)
 │   ├── registry/         # Core orchestration (publish, download, governance)
-│   ├── storage/          # Content-addressable blob storage (SHA-256)
+│   ├── storage/          # Filesystem/S3 content-addressable blob storage
+│   ├── backup/           # Metadata and blob backup/restore
+│   ├── ratelimit/        # In-memory and Redis rate limiting
 │   └── validation/       # Package validator (profiles: default / strict / publish)
 └── pkg/
     └── client/           # Go client library
@@ -185,15 +189,14 @@ skforge publish dist/my-skill-1.0.0.tgz --registry http://localhost:8080
 
 Consumer lifecycle (`add`, `lock`, `install`, `update`, `verify`) is handled by **`skpm`**, not `skforge`.
 
-## Known Open Items
+## Current boundaries and follow-up work
 
 | Item | Status |
 | --- | --- |
-| Upstream proxy | Interface defined, HTTP implementation pending |
-| Package signing enforcement | SignatureStatus tracked, verification not enforced |
-| S3-compatible storage backend | Filesystem only today |
-| PostgreSQL backend | SQLite only today (suitable to ~100K versions) |
-| Web UI | Static file serving wired, UI not built |
+| Upstream proxy | Design notes and interface exist; request proxy/cache behavior is not implemented. |
+| Cryptographic signature verification | Signature status is stored, but signatures are not cryptographically verified during admission. |
+| Runtime reconciliation | Activation records desired state; a controller that starts and supervises workloads is not included. |
+| Instructions rendering | Platform-specific deployment/rendering is not implemented by the registry. |
 
 ## Build & Test
 

@@ -10,14 +10,20 @@ Supported kinds:
 - `prompt`
 - `tool`
 - `bundle`
-- `mcp`, `instructions`, `hook`, `plugin`, `policy`, `container`
-- `model-runtime`, `model-profile`
+- `mcp`
+- `instructions`
+- `hook`
+- `plugin`
+- `policy`
+- `container`
+- `model-runtime`
+- `model-profile`
 
-Executable kinds use `skillforge.dev/v2`. Publishing stores and validates
-artifacts but never executes them. Runtime activation follows an audited
-`install → approve → activate` desired-state workflow; a separate controller
-reconciles containers and reports health. Image references must include a
-SHA-256 digest. Credentials use `secret_refs`, not literal environment values.
+Executable artifact kinds use `skillforge.dev/v2`. Publishing stores and
+validates artifacts but does not execute them. Runtime activation uses an
+audited desired-state workflow; a separate controller owns reconciliation.
+Container images must be digest-pinned. Credentials belong in secret
+references, not literal manifest environment values.
 
 ## Manifest
 
