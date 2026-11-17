@@ -145,18 +145,24 @@ func TestHA_MultiReplicaConsistency(t *testing.T) {
 	pubReq, _ := http.NewRequest("PUT", serverA.URL+"/api/v1/skills/ha-ns/ha-skill/versions/1.0.0", bytes.NewReader(pkgData))
 	pubReq.Header.Set("Content-Type", "application/gzip")
 	pubReq.Header.Set("Authorization", "Bearer "+token.Token)
-	pubResp, err := http.DefaultClient.Do(pubReq)
-	if err != nil || pubResp.StatusCode != http.StatusCreated {
-		t.Fatalf("Step 1 (Publish via A) failed, status: %v, err: %v", pubResp.Status, err)
+	pubResp, err := serverA.Client().Do(pubReq)
+	if err != nil {
+		t.Fatalf("Step 1 (Publish via A) failed: %v", err)
+	}
+	if pubResp.StatusCode != http.StatusCreated {
+		t.Fatalf("Step 1 (Publish via A) failed, status: %v", pubResp.Status)
 	}
 	pubResp.Body.Close()
 
 	// Step 2: Resolve through Replica B
 	resolveReq, _ := http.NewRequest("GET", serverB.URL+"/api/v1/skills/ha-ns/ha-skill/resolve?constraint=^1.0.0", nil)
 	resolveReq.Header.Set("Authorization", "Bearer "+token.Token)
-	resolveResp, err := http.DefaultClient.Do(resolveReq)
-	if err != nil || resolveResp.StatusCode != http.StatusOK {
-		t.Fatalf("Step 2 (Resolve via B) failed, status: %v, err: %v", resolveResp.Status, err)
+	resolveResp, err := serverB.Client().Do(resolveReq)
+	if err != nil {
+		t.Fatalf("Step 2 (Resolve via B) failed: %v", err)
+	}
+	if resolveResp.StatusCode != http.StatusOK {
+		t.Fatalf("Step 2 (Resolve via B) failed, status: %v", resolveResp.Status)
 	}
 	var resolveDTO struct {
 		Version string `json:"version"`
@@ -171,9 +177,12 @@ func TestHA_MultiReplicaConsistency(t *testing.T) {
 	// Step 3: Download through Replica C
 	dlReq, _ := http.NewRequest("GET", serverC.URL+"/api/v1/skills/ha-ns/ha-skill/versions/1.0.0/download", nil)
 	dlReq.Header.Set("Authorization", "Bearer "+token.Token)
-	dlResp, err := http.DefaultClient.Do(dlReq)
-	if err != nil || dlResp.StatusCode != http.StatusOK {
-		t.Fatalf("Step 3 (Download via C) failed, status: %v, err: %v", dlResp.Status, err)
+	dlResp, err := serverC.Client().Do(dlReq)
+	if err != nil {
+		t.Fatalf("Step 3 (Download via C) failed: %v", err)
+	}
+	if dlResp.StatusCode != http.StatusOK {
+		t.Fatalf("Step 3 (Download via C) failed, status: %v", dlResp.Status)
 	}
 	dlData, err := io.ReadAll(dlResp.Body)
 	dlResp.Body.Close()
@@ -190,9 +199,12 @@ func TestHA_MultiReplicaConsistency(t *testing.T) {
 	attestReq, _ := http.NewRequest("PUT", serverB.URL+"/api/v1/artifacts/skill/ha-ns/ha-skill/versions/1.0.0/attestations", bytes.NewReader(attestBody))
 	attestReq.Header.Set("Content-Type", "application/json")
 	attestReq.Header.Set("Authorization", "Bearer "+token.Token)
-	attestResp, err := http.DefaultClient.Do(attestReq)
-	if err != nil || (attestResp.StatusCode != http.StatusOK && attestResp.StatusCode != http.StatusCreated) {
-		t.Fatalf("Step 4 (Attestation via B) failed, status: %v, err: %v", attestResp.Status, err)
+	attestResp, err := serverB.Client().Do(attestReq)
+	if err != nil {
+		t.Fatalf("Step 4 (Attestation via B) failed: %v", err)
+	}
+	if attestResp.StatusCode != http.StatusOK && attestResp.StatusCode != http.StatusCreated {
+		t.Fatalf("Step 4 (Attestation via B) failed, status: %v", attestResp.Status)
 	}
 	attestResp.Body.Close()
 
@@ -201,17 +213,23 @@ func TestHA_MultiReplicaConsistency(t *testing.T) {
 	yankReq, _ := http.NewRequest("POST", serverA.URL+"/api/v1/skills/ha-ns/ha-skill/versions/1.0.0/yank", bytes.NewReader(yankBody))
 	yankReq.Header.Set("Content-Type", "application/json")
 	yankReq.Header.Set("Authorization", "Bearer "+token.Token)
-	yankResp, err := http.DefaultClient.Do(yankReq)
-	if err != nil || yankResp.StatusCode != http.StatusOK {
-		t.Fatalf("Step 5 (Yank via A) failed, status: %v, err: %v", yankResp.Status, err)
+	yankResp, err := serverA.Client().Do(yankReq)
+	if err != nil {
+		t.Fatalf("Step 5 (Yank via A) failed: %v", err)
+	}
+	if yankResp.StatusCode != http.StatusOK {
+		t.Fatalf("Step 5 (Yank via A) failed, status: %v", yankResp.Status)
 	}
 	yankResp.Body.Close()
 
 	// Step 6: Query via Replica C (Resolution should now fail / return 404 because version is yanked)
 	queryReq, _ := http.NewRequest("GET", serverC.URL+"/api/v1/skills/ha-ns/ha-skill/resolve?constraint=^1.0.0", nil)
 	queryReq.Header.Set("Authorization", "Bearer "+token.Token)
-	queryResp, err := http.DefaultClient.Do(queryReq)
-	if err != nil || queryResp.StatusCode != http.StatusNotFound {
+	queryResp, err := serverC.Client().Do(queryReq)
+	if err != nil {
+		t.Fatalf("Step 6 (Query via C after Yank) failed: %v", err)
+	}
+	if queryResp.StatusCode != http.StatusNotFound {
 		t.Fatalf("Step 6 (Query via C after Yank) expected 404 NotFound, got status: %v", queryResp.Status)
 	}
 	queryResp.Body.Close()

@@ -1,6 +1,8 @@
 # GitHub Actions Workflows
 
-This directory contains all CI/CD workflows for SkillForge.
+This directory contains the GitHub Actions workflows configured for SkillForge.
+For the authoritative triggers, permissions, and required checks, see each
+workflow file; this page is a navigation overview.
 
 ## Workflows Overview
 
@@ -12,20 +14,20 @@ This directory contains all CI/CD workflows for SkillForge.
   - Vulnerability scanning (govulncheck)
   - Static analysis (staticcheck)
   - Docker image build and smoke testing
-  - Runs on: Push to `main`, PRs
+  - Runs on: See the `on` declaration in the workflow file
 
 - **[frontend.yml](frontend.yml)** - Web UI workflow
   - Build React/Vite application
   - Dependency checks
   - Bundle size analysis
   - Type checking (if configured)
-  - Runs on: Push to `main`, PRs affecting web/
+  - Runs on: See the `on` declaration in the workflow file
 
 - **[integration-tests.yml](integration-tests.yml)** - E2E testing
   - Builds complete stack (backend + frontend)
   - Runs Playwright tests
   - Generates test reports
-  - Runs on: Push to `main`, PRs, manual trigger
+  - Runs on: See the `on` declaration in the workflow file
 
 ### Security & Quality
 
@@ -33,7 +35,7 @@ This directory contains all CI/CD workflows for SkillForge.
   - Analyzes Go and JavaScript/TypeScript code
   - Detects security vulnerabilities
   - Runs quality checks
-  - Runs on: Push to `main`, PRs, weekly schedule, manual trigger
+  - Runs on: See the `on` declaration in the workflow file
 
 - **[base-image-refresh.yml](base-image-refresh.yml)** - Container security
   - Weekly rebuild with latest base images
@@ -50,7 +52,7 @@ This directory contains all CI/CD workflows for SkillForge.
   - Image signing with cosign
   - SBOM generation
   - GitHub Release creation
-  - Runs on: Version tags (`v*.*.*`)
+  - Runs on: See the `on` declaration in the workflow file
 
 ### Validation & Documentation
 
@@ -59,14 +61,14 @@ This directory contains all CI/CD workflows for SkillForge.
   - Checks required files (SKILL.md, VERSION, CHANGELOG.md)
   - Verifies SemVer format
   - Tests packaging
-  - Runs on: Push to `main`, PRs affecting examples/
+  - Runs on: See the `on` declaration in the workflow file
 
 - **[openapi.yml](openapi.yml)** - API documentation
   - Validates OpenAPI specifications
   - Generates bundled spec
   - Creates ReDoc documentation
   - Detects breaking changes in PRs
-  - Runs on: Push to `main`, PRs affecting OpenAPI files
+  - Runs on: See the `on` declaration in the workflow file
 
 - **[pr-checks.yml](pr-checks.yml)** - PR validation
   - Validates PR title format
@@ -75,7 +77,7 @@ This directory contains all CI/CD workflows for SkillForge.
   - Detects large files
   - Scans for sensitive data patterns
   - Posts PR summary comment
-  - Runs on: PR open, synchronize, reopen
+  - Runs on: See the `on` declaration in the workflow file
 
 ## Automated Dependency Updates
 
@@ -86,27 +88,22 @@ This directory contains all CI/CD workflows for SkillForge.
   - GitHub Actions (weekly)
   - Groups minor and patch updates
 
-## Required Secrets
+## Secrets and permissions
 
-### For Releases
-
-- `GITHUB_TOKEN` - Automatically provided by GitHub Actions
-  - Used for: Creating releases, pushing Docker images, signing with cosign
-
-### Optional Secrets
-
-- `SLACK_WEBHOOK` - For build notifications (not configured)
-- `CODECOV_TOKEN` - For coverage reporting (not configured)
+Workflow permissions and referenced secrets are defined in the workflow files.
+GitHub's automatically provided `GITHUB_TOKEN` is used where configured.
+Repository owners should review permissions when changing release or publishing
+workflows.
 
 ## Status Badges
 
 Add these to your README.md:
 
 ```markdown
-![CI](https://github.com/YOUR_ORG/SkillForge/workflows/skill-registry/badge.svg)
-![Frontend](https://github.com/YOUR_ORG/SkillForge/workflows/frontend/badge.svg)
-![Integration Tests](https://github.com/YOUR_ORG/SkillForge/workflows/integration-tests/badge.svg)
-![CodeQL](https://github.com/YOUR_ORG/SkillForge/workflows/codeql/badge.svg)
+[![Registry CI](https://github.com/domehahn/SkillForge/actions/workflows/skill-registry.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/skill-registry.yml)
+[![Frontend CI](https://github.com/domehahn/SkillForge/actions/workflows/frontend.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/frontend.yml)
+[![Integration Tests](https://github.com/domehahn/SkillForge/actions/workflows/integration-tests.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/integration-tests.yml)
+[![CodeQL](https://github.com/domehahn/SkillForge/actions/workflows/codeql.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/codeql.yml)
 ```
 
 ## Local Testing

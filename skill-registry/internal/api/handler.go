@@ -23,19 +23,21 @@ import (
 	"github.com/skillforge/skill-registry/internal/email"
 	"github.com/skillforge/skill-registry/internal/metadata"
 	"github.com/skillforge/skill-registry/internal/observability"
+	"github.com/skillforge/skill-registry/internal/ratelimit"
 	"github.com/skillforge/skill-registry/internal/registry"
 	"github.com/skillforge/skill-registry/internal/validation"
 )
 
 // Handler handles HTTP requests
 type Handler struct {
-	registry  *registry.Registry
-	auth      *auth.Authenticator
-	audit     *audit.Repository // may be nil; no audit logging when nil
-	logger    *slog.Logger
-	config    *config.Config
-	email     *email.Sender
-	clientIPs *clientip.Resolver
+	registry         *registry.Registry
+	auth             *auth.Authenticator
+	audit            *audit.Repository // may be nil; no audit logging when nil
+	logger           *slog.Logger
+	config           *config.Config
+	email            *email.Sender
+	clientIPs        *clientip.Resolver
+	rateLimitBackend ratelimit.Backend
 }
 
 // NewHandler creates a new API handler. auditRepo may be nil to disable audit logging.
@@ -108,6 +110,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Get("/skills/{namespace}/{name}/dist-tags", h.ListDistTags)
 			r.Get("/skills/{namespace}/{name}/versions/{version}", h.GetVersion)
 			r.Get("/skills/{namespace}/{name}/versions/{version}/download", h.Download)
+			r.Get("/activations", h.ListActivations)
+			r.Get("/activations/{kind}/{namespace}/{name}", h.GetActivation)
 		})
 
 		// Token management — scoped individually so each operation requires its own scope.
@@ -186,6 +190,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Post("/namespaces/{namespace}/webhooks/{id}/test", h.TestWebhook)
 			r.Get("/namespaces/{namespace}/webhooks/{id}/deliveries", h.ListWebhookDeliveries)
 			r.Put("/namespaces/{namespace}/pinned", h.SetPinned)
+			r.Post("/activations/{kind}/{namespace}/{name}/actions", h.ChangeActivation)
+			r.Put("/activations/{kind}/{namespace}/{name}/status", h.ReportActivation)
 		})
 
 		// Namespace admin endpoints (require namespace:admin scope)
@@ -235,14 +241,50 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// ReadyCheck handles readiness check requests
+func (h *Handler) SetRateLimitBackend(backend ratelimit.Backend) {
+	h.rateLimitBackend = backend
+}
+
+// ReadyCheck handles readiness check requests, probing DB, Storage, and Rate Limiter
 func (h *Handler) ReadyCheck(w http.ResponseWriter, r *http.Request) {
-	if err := h.registry.Ping(r.Context()); err != nil {
+	ctx := r.Context()
+	details := make(map[string]string)
+	failed := false
+
+	if err := h.registry.Ping(ctx); err != nil {
 		h.logger.Error("readyz: db ping failed", "error", err)
-		WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not ready", "error": "database unavailable"})
+		details["database"] = err.Error()
+		failed = true
+	} else {
+		details["database"] = "ok"
+	}
+
+	if err := h.registry.StoragePing(ctx); err != nil {
+		h.logger.Error("readyz: storage ping failed", "error", err)
+		details["storage"] = err.Error()
+		failed = true
+	} else {
+		details["storage"] = "ok"
+	}
+
+	if h.rateLimitBackend != nil {
+		if err := h.rateLimitBackend.Ping(ctx); err != nil {
+			h.logger.Error("readyz: ratelimit ping failed", "error", err)
+			details["ratelimit"] = err.Error()
+			failed = true
+		} else {
+			details["ratelimit"] = "ok"
+		}
+	}
+
+	if failed {
+		details["status"] = "not ready"
+		WriteJSON(w, http.StatusServiceUnavailable, details)
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "ready"})
+
+	details["status"] = "ready"
+	WriteJSON(w, http.StatusOK, details)
 }
 
 // GetMetadata returns registry metadata
@@ -258,7 +300,8 @@ func (h *Handler) GetMetadata(w http.ResponseWriter, r *http.Request) {
 		SupportedPackageTypes: h.config.Storage.AllowedPackageTypes,
 		AuthMode:              authMode,
 		Capabilities: []string{
-			"artifacts", "skills", "agents", "flows", "prompts", "tools", "bundles",
+			"artifacts", "skills", "agents", "flows", "prompts", "tools", "bundles", "mcp",
+			"instructions", "hooks", "plugins", "policies", "containers", "model-runtimes", "model-profiles", "activations",
 			"dependencies", "lockfiles", "graphs", "promotions", "namespace-acls",
 			"webhooks", "attestations", "oci-descriptors", "immutable-versions",
 		},

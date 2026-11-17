@@ -681,6 +681,9 @@ func (h *Handler) GetMCPManifest(w http.ResponseWriter, r *http.Request) {
 		if len(mcpSpec.Env) > 0 {
 			serverConfig["env"] = mcpSpec.Env
 		}
+		if len(mcpSpec.SecretRefs) > 0 {
+			serverConfig["x-skillforge-secret-refs"] = mcpSpec.SecretRefs
+		}
 	}
 	tools := []interface{}{}
 	resources := []interface{}{}

@@ -71,6 +71,7 @@ func main() {
 
 	// Initialize registry
 	reg := registry.NewRegistry(repo, store, validator, logger)
+	reg.SetWebhookSigningKey(cfg.Security.WebhookSigningKey)
 
 	// Initialize authenticator
 	authenticator, err := auth.NewAuthenticatorWithBcryptCost(cfg.Auth.Enabled, repo.GetDB(), cfg.Auth.BcryptCost)
@@ -141,6 +142,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize rate limiter: %v", err)
 		}
+		handler.SetRateLimitBackend(backend)
 		limiter := ratelimit.New(backend, cfg.Security.TrustedProxies, logger)
 		r.Use(ratelimit.Middleware(limiter))
 	}
