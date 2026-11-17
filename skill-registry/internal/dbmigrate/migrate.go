@@ -12,11 +12,8 @@ import (
 // On failure, the transaction is rolled back and the error is returned (fail closed).
 func RunContext(ctx context.Context, db *sql.DB, id string, fn func(tx *sql.Tx) error) error {
 	// Try acquiring Postgres advisory lock if using postgres driver
-	var isPostgres bool
 	var lockAcquired bool
-	// Test if postgres by attempting a ping or checking driver name via sql handle
-	_ = db.QueryRowContext(ctx, "SELECT pg_advisory_lock(837482910)").Scan(&isPostgres)
-	if isPostgres {
+	if _, err := db.ExecContext(ctx, "SELECT pg_advisory_lock(837482910)"); err == nil {
 		lockAcquired = true
 		defer func() {
 			_, _ = db.ExecContext(ctx, "SELECT pg_advisory_unlock(837482910)")

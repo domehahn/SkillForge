@@ -248,7 +248,8 @@ func (r *Registry) CreateArtifactAttestation(ctx context.Context, kind, namespac
 	if attestationType == "" {
 		return nil, fmt.Errorf("attestation type must not be empty")
 	}
-	if digest != artifactVersion.DigestSHA256 || len(digest) != 64 {
+	cleanDigest := strings.TrimPrefix(digest, "sha256:")
+	if cleanDigest != artifactVersion.DigestSHA256 || len(cleanDigest) != 64 {
 		return nil, fmt.Errorf("ATTESTATION_DIGEST_MISMATCH: evidence must reference the published artifact")
 	}
 	if len(predicate) == 0 {
@@ -260,14 +261,14 @@ func (r *Registry) CreateArtifactAttestation(ctx context.Context, kind, namespac
 	}
 	if attestationType == "scan" {
 		subject, ok := predicate["subject"].(map[string]interface{})
-		if !ok || subject["sha256"] != digest {
+		if !ok || strings.TrimPrefix(fmt.Sprintf("%v", subject["sha256"]), "sha256:") != cleanDigest {
 			return nil, fmt.Errorf("ATTESTATION_SUBJECT_MISMATCH: predicate does not identify the published artifact")
 		}
 		if predicate["version"] != float64(1) && predicate["version"] != 1 {
 			return nil, fmt.Errorf("ATTESTATION_SCHEMA_UNSUPPORTED: expected version 1")
 		}
 	}
-	attestation := &metadata.Attestation{ArtifactVersionID: artifactVersion.ID, Type: attestationType, Digest: digest, Predicate: predicate, CreatedBy: actor}
+	attestation := &metadata.Attestation{ArtifactVersionID: artifactVersion.ID, Type: attestationType, Digest: cleanDigest, Predicate: predicate, CreatedBy: actor}
 	if err := r.repo.CreateAttestation(ctx, attestation); err != nil {
 		return nil, err
 	}
@@ -341,6 +342,10 @@ func (r *Registry) ListWebhooks(ctx context.Context, namespace string) ([]metada
 }
 
 func (r *Registry) deliverWebhookEvent(ctx context.Context, namespace, event string, payload interface{}) {
+	if !r.HasStableWebhookSigningKey() {
+		r.logger.Warn("webhook delivery skipped: configure SKILL_REGISTRY_WEBHOOK_SIGNING_KEY")
+		return
+	}
 	hooks, err := r.repo.ListWebhooks(ctx, namespace)
 	if err != nil {
 		r.logger.Warn("failed to list webhooks", "error", err)
@@ -369,7 +374,7 @@ func (r *Registry) deliverWebhookEvent(ctx context.Context, namespace, event str
 		go func(hook metadata.Webhook) {
 			deliveryID := fmt.Sprintf("del-%d-%s", time.Now().UnixNano(), eventID)
 			timestampStr := fmt.Sprintf("%d", time.Now().Unix())
-			mac := hmac.New(sha256.New, []byte("skillforge-webhook-secret"))
+			mac := hmac.New(sha256.New, r.webhookSigningKey)
 			mac.Write([]byte(timestampStr + "." + string(body)))
 			signature := hex.EncodeToString(mac.Sum(nil))
 

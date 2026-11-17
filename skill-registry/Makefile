@@ -1,4 +1,4 @@
-.PHONY: build test lint run docker-build compose-up compose-down clean build-web install-web dev-web
+.PHONY: build test lint run docker-build compose-up compose-down clean clean-local-data build-web install-web dev-web
 
 # Go parameters
 GOCMD=go
@@ -58,11 +58,13 @@ compose-down:
 clean:
 	@echo "Cleaning up..."
 	rm -rf $(BIN_DIR)
-	rm -rf ./data
 	rm -rf $(WEB_DIR)/dist
-	rm -rf $(WEB_DIR)/node_modules
 	rm -f coverage.txt
 	@echo "Clean complete!"
+
+# Intentionally destructive: removes the local registry database and stored artifacts.
+clean-local-data:
+	rm -rf ./data
 
 # Web UI targets
 install-web:

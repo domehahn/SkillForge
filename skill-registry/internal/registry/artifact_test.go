@@ -9,8 +9,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/skillforge/skill-registry/internal/metadata"
 )
 
 func TestArtifactRegistryDependencyGraphAndLockfile(t *testing.T) {
@@ -55,6 +58,47 @@ func TestArtifactRegistryDependencyGraphAndLockfile(t *testing.T) {
 	resolved, err := reg.ResolveArtifactVersion(ctx, "agent", "demo", "reviewer", "production")
 	if err != nil || resolved.Version != "1.0.0" {
 		t.Fatalf("promotion did not resolve: %#v %v", resolved, err)
+	}
+}
+
+func TestActivationRequiresScanApprovalAndRejectsStaleReports(t *testing.T) {
+	reg, cleanup := setupTestRegistry(t)
+	defer cleanup()
+	ctx := context.Background()
+	digest := strings.Repeat("a", 64)
+	manifest := "apiVersion: skillforge.dev/v2\nkind: model-runtime\nmetadata:\n  namespace: demo\n  name: local-llm\n  version: 1.0.0\nspec:\n  entrypoint: runtime.yaml\n  model_runtime:\n    engine: ollama\n    image: ollama/ollama@sha256:" + digest + "\n"
+	data := artifactPackage(t, map[string]string{"artifact.yaml": manifest, "runtime.yaml": "engine: ollama"})
+	result, err := reg.PublishArtifact(ctx, "model-runtime", "demo", "local-llm", "1.0.0", data, "tgz", "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version.ScanStatus != "pending" {
+		t.Fatalf("expected pending scan, got %q", result.Version.ScanStatus)
+	}
+	if _, err := reg.ChangeActivation(ctx, "demo", "model-runtime", "local-llm", "1.0.0", "install", "test", "owner", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.ChangeActivation(ctx, "demo", "model-runtime", "local-llm", "", "approve", "test", "owner", false); err == nil {
+		t.Fatal("approval should require a passing scan")
+	}
+	if err := reg.SetArtifactAttestation(ctx, "model-runtime", "demo", "local-llm", "1.0.0", "verified", "passed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.ChangeActivation(ctx, "demo", "model-runtime", "local-llm", "", "approve", "reviewed", "owner", true); err != nil {
+		t.Fatal(err)
+	}
+	a, err := reg.ChangeActivation(ctx, "demo", "model-runtime", "local-llm", "", "activate", "approved", "owner", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.DesiredState != metadata.ActivationStateActive {
+		t.Fatalf("unexpected state %q", a.DesiredState)
+	}
+	if _, err := reg.ReportActivation(ctx, "demo", "model-runtime", "local-llm", "active", "", "controller", a.Generation-1); err == nil {
+		t.Fatal("stale generation should be rejected")
+	}
+	if _, err := reg.ReportActivation(ctx, "demo", "model-runtime", "local-llm", "active", "", "controller", a.Generation); err != nil {
+		t.Fatal(err)
 	}
 }
 

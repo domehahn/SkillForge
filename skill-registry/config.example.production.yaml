@@ -1,0 +1,68 @@
+# SkillForge Registry — Hardened Production Configuration Example
+# All credentials and secret keys must be passed via environment variable references.
+server:
+  addr: "${SKILL_REGISTRY_ADDR:-:8080}"
+
+security:
+  headers_enabled: true
+  content_security_policy: "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
+  hsts_enabled: true
+  hsts_max_age_seconds: 31536000
+  openapi_cors_origin: "${SKILL_REGISTRY_CORS_ORIGIN:-https://registry.example.com}"
+  trusted_proxies:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+storage:
+  backend: "s3"
+  max_package_size_mb: 50
+  allowed_package_types:
+    - "tgz"
+    - "zip"
+  s3:
+    endpoint: "${SKILL_REGISTRY_STORAGE_S3_ENDPOINT:-s3.us-east-1.amazonaws.com}"
+    region: "${SKILL_REGISTRY_STORAGE_S3_REGION:-us-east-1}"
+    bucket: "${SKILL_REGISTRY_STORAGE_S3_BUCKET:-skillforge-registry-blobs}"
+    access_key: "${SKILL_REGISTRY_STORAGE_S3_ACCESS_KEY}"
+    secret_key: "${SKILL_REGISTRY_STORAGE_S3_SECRET_KEY}"
+    use_ssl: true
+    path_style: false
+
+database:
+  driver: "postgres"
+  dsn: "${SKILL_REGISTRY_DB_DSN}"
+
+auth:
+  enabled: true
+  bcrypt_cost: 12
+  require_email_verification: true
+
+email:
+  smtp_enabled: true
+  smtp_host: "${SKILL_REGISTRY_SMTP_HOST}"
+  smtp_port: 587
+  smtp_username: "${SKILL_REGISTRY_SMTP_USER}"
+  smtp_password: "${SKILL_REGISTRY_SMTP_PASS}"
+  from: "${SKILL_REGISTRY_EMAIL_FROM:-SkillForge Registry <noreply@registry.example.com>}"
+  base_url: "${SKILL_REGISTRY_BASE_URL:-https://registry.example.com}"
+
+backup:
+  enabled: true
+  output_dir: "/app/backups"
+  interval_minutes: 360
+  retention_copies: 30
+
+production:
+  mode: true
+  enforce: true
+
+rate_limit:
+  enabled: true
+  requests_per_minute: 1000
+  backend: "redis"
+  redis:
+    addr: "${SKILL_REGISTRY_REDIS_ADDR:-redis:6379}"
+    password: "${SKILL_REGISTRY_REDIS_PASSWORD}"
+    db: 0
+    key_prefix: "skillforge:ratelimit:"
