@@ -11,6 +11,12 @@ const KINDS = [
   { id: 'prompt', icon: '❝', label: 'Prompts',  desc: 'Prompt templates and instructions' },
   { id: 'tool',   icon: '⚙', label: 'Tools',    desc: 'External tools and integrations' },
   { id: 'bundle', icon: '▣', label: 'Bundles',  desc: 'Curated collections of artifacts' },
+  { id: 'mcp', icon: '🔌', label: 'MCP servers', desc: 'Model Context Protocol integrations' },
+  { id: 'instructions', icon: '📄', label: 'Instructions', desc: 'AGENTS.md and platform guidance' },
+  { id: 'hook', icon: '⚓', label: 'Hooks', desc: 'Reviewed agent lifecycle hooks' },
+  { id: 'plugin', icon: '🧩', label: 'Plugins', desc: 'Managed agent adapters' },
+  { id: 'model-runtime', icon: '🧠', label: 'Model runtimes', desc: 'Local containerized inference engines' },
+  { id: 'model-profile', icon: '📦', label: 'Model profiles', desc: 'Versioned local model configurations' },
 ]
 
 export default function ExplorePage() {

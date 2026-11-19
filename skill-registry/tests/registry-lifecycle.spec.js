@@ -36,7 +36,8 @@ function tgz(files) {
 }
 
 function artifactManifest(kind, namespace, name, version, entrypoint, extraSpec = '') {
-  return `apiVersion: skillforge.dev/v1
+  const apiVersion = kind === 'mcp' ? 'skillforge.dev/v2' : 'skillforge.dev/v1'
+  return `apiVersion: ${apiVersion}
 kind: ${kind}
 metadata:
   namespace: ${namespace}

@@ -49,6 +49,10 @@ func (b *MemoryBackend) Allow(_ context.Context, key string) (bool, error) {
 	return true, nil
 }
 
+func (b *MemoryBackend) Ping(_ context.Context) error {
+	return nil
+}
+
 func (b *MemoryBackend) cleanup() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
