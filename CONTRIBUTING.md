@@ -33,6 +33,12 @@ the pull request description.
 - Keep credentials, local databases, generated bundles, and build outputs out
   of commits.
 - Call out known limitations and migration requirements.
+- Use the repository pull request template to record validation and compatibility
+  impact.
+
+Bug reports and feature requests can be opened with the repository issue
+templates. Report security vulnerabilities privately as described in
+[`SECURITY.md`](SECURITY.md).
 
 ## Commit messages
 
