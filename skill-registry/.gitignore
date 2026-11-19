@@ -78,3 +78,7 @@ temp/
 .env
 .env.local
 .env.*.local
+certs/*.pem
+certs/*.key
+certs/*.crt
+

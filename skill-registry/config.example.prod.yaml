@@ -1,0 +1,80 @@
+# SkillForge Production Configuration Example
+# Copy to config.prod.yaml or specify path via CLI / env.
+
+server:
+  addr: ":8080"
+
+production:
+  mode: true
+  enforce: true
+
+database:
+  driver: "postgres"
+  dsn: "postgres://skillforge:ChangeMeInProduction@postgres:5432/skillforge?sslmode=require&connect_timeout=10"
+
+storage:
+  backend: "s3"
+  max_package_size_mb: 50
+  allowed_package_types:
+    - "tgz"
+    - "zip"
+  s3:
+    endpoint: "s3.us-east-1.amazonaws.com"
+    region: "us-east-1"
+    bucket: "skillforge-production-blobs"
+    access_key: "${AWS_ACCESS_KEY_ID}"
+    secret_key: "${AWS_SECRET_ACCESS_KEY}"
+    use_ssl: true
+    path_style: false
+
+rate_limit:
+  enabled: true
+  requests_per_minute: 300
+  backend: "redis"
+  redis:
+    addr: "redis:6379"
+    password: "${REDIS_PASSWORD}"
+    db: 0
+    key_prefix: "skillforge:ratelimit:"
+
+auth:
+  enabled: true
+  bcrypt_cost: 12
+  require_email_verification: true
+  tokens:
+    - name: "ci-publish"
+      token_env: "SKILL_REGISTRY_CI_TOKEN"
+      scopes:
+        - "read"
+        - "write"
+        - "attest"
+
+security:
+  headers_enabled: true
+  content_security_policy: "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
+  hsts_enabled: true
+  hsts_max_age_seconds: 31536000
+  openapi_cors_origin: "https://registry.example.com"
+  trusted_proxies:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+
+tls:
+  enabled: false # Handled by ingress/reverse proxy (TLS termination) with X-Forwarded-For trusted_proxies configured above
+
+backup:
+  enabled: true
+  output_dir: "/var/backups/skillforge"
+  interval_minutes: 360
+  retention_copies: 30
+
+email:
+  smtp_enabled: true
+  smtp_host: "smtp.sendgrid.net"
+  smtp_port: 587
+  smtp_username: "apikey"
+  smtp_password: "${SMTP_PASSWORD}"
+  from: "SkillForge Registry <noreply@example.com>"
+  base_url: "https://registry.example.com"
+

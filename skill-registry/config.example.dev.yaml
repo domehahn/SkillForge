@@ -1,0 +1,48 @@
+# SkillForge Registry — Development Configuration Example
+server:
+  addr: ":8080"
+
+security:
+  headers_enabled: true
+  content_security_policy: "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'"
+  hsts_enabled: false
+  openapi_cors_origin: "http://localhost:8080"
+  trusted_proxies:
+    - "127.0.0.1/32"
+
+storage:
+  backend: "filesystem"
+  data_dir: "./data"
+  max_package_size_mb: 50
+  allowed_package_types:
+    - "tgz"
+    - "zip"
+
+database:
+  driver: "sqlite"
+  path: "./data/registry.db"
+
+auth:
+  enabled: true
+  bcrypt_cost: 10
+  require_email_verification: false
+
+email:
+  smtp_enabled: false
+  from: "SkillForge Dev <noreply@localhost>"
+  base_url: "http://localhost:8080"
+
+backup:
+  enabled: false
+  output_dir: "./backups"
+  interval_minutes: 360
+  retention_copies: 14
+
+production:
+  mode: false
+  enforce: false
+
+rate_limit:
+  enabled: true
+  requests_per_minute: 300
+  backend: "memory"

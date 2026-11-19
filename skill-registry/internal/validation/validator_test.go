@@ -16,11 +16,11 @@ func TestValidateSkillName(t *testing.T) {
 		wantErr bool
 	}{
 		{"valid simple", "myskill", false},
-		{"valid with dot", "my.skill", true},        // spec: kebab-case only, no dots
+		{"valid with dot", "my.skill", true}, // spec: kebab-case only, no dots
 		{"valid with dash", "my-skill", false},
 		{"valid with underscore", "my_skill", true}, // spec: kebab-case only, no underscores
 		{"invalid uppercase", "MySkill", true},
-		{"invalid too short", "a", false},           // spec: single char allowed
+		{"invalid too short", "a", false}, // spec: single char allowed
 		{"invalid starts with dash", "-myskill", true},
 		{"invalid special char", "my@skill", true},
 	}
@@ -54,6 +54,37 @@ func TestValidateVersion(t *testing.T) {
 			err := ValidateVersion(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateVersion() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateArtifactRuntimeContracts(t *testing.T) {
+	tests := []struct {
+		name      string
+		kind      string
+		spec      string
+		files     map[string]string
+		wantError string
+	}{
+		{"instructions safe target", "instructions", "\n  instructions:\n    format: agents.md\n    scope: repository\n    target_path: AGENTS.md\n    merge_strategy: replace", map[string]string{"AGENTS.md": "# Guidance"}, ""},
+		{"instructions traversal", "instructions", "\n  instructions:\n    format: agents.md\n    scope: repository\n    target_path: ../AGENTS.md", map[string]string{"AGENTS.md": "# Guidance"}, "safe relative path"},
+		{"runtime requires digest", "model-runtime", "\n  model_runtime:\n    engine: ollama\n    image: ollama/ollama:latest", map[string]string{"runtime.yaml": "engine: ollama"}, "sha256 digest"},
+		{"secret literal rejected", "mcp", "\n  mcp:\n    transport: stdio\n    command: [node, server.js]\n    env:\n      API_TOKEN: literal", map[string]string{"mcp.yaml": "transport: stdio"}, "must use secret_refs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := "apiVersion: skillforge.dev/v2\nkind: " + tt.kind + "\nmetadata:\n  namespace: demo\n  name: sample\n  version: 1.0.0\nspec:\n  entrypoint: " + map[string]string{"instructions": "AGENTS.md", "model-runtime": "runtime.yaml", "mcp": "mcp.yaml"}[tt.kind] + tt.spec + "\n"
+			files := map[string]string{"artifact.yaml": manifest}
+			for k, v := range tt.files {
+				files[k] = v
+			}
+			_, _, err := NewValidator(10, nil).ValidateArtifactPackage(createTestTarGz(t, files), "tgz", tt.kind)
+			if tt.wantError == "" && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+			if tt.wantError != "" && (err == nil || !strings.Contains(err.Error(), tt.wantError)) {
+				t.Fatalf("error %v does not contain %q", err, tt.wantError)
 			}
 		})
 	}
@@ -466,11 +497,11 @@ func TestValidateSkillName_EdgeCases(t *testing.T) {
 	}{
 		{"empty", "", true},
 		{"max length", strings.Repeat("a", 128), false},
-		{"too long", strings.Repeat("a", 129), false},    // spec: no length limit
+		{"too long", strings.Repeat("a", 129), false}, // spec: no length limit
 		{"starts with number", "1skill", false},
 		{"starts with underscore", "_skill", true},
-		{"ends with dash", "skill-", true},               // spec: trailing dash invalid
-		{"consecutive dashes", "my--skill", true},        // spec: consecutive dashes invalid
+		{"ends with dash", "skill-", true},        // spec: trailing dash invalid
+		{"consecutive dashes", "my--skill", true}, // spec: consecutive dashes invalid
 		{"all numbers", "123", false},
 		{"with space", "my skill", true},
 	}

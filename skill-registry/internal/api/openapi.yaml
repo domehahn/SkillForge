@@ -93,6 +93,12 @@ components:
       type: object
       properties:
         error:
+          type: string
+          example: Artifact not found
+        code:
+          type: string
+          example: NOT_FOUND
+        detail:
           type: object
           properties:
             code:
@@ -101,6 +107,11 @@ components:
             message:
               type: string
               example: Artifact not found
+            details:
+              type: array
+              items:
+                type: string
+              example: ["Artifact br-ns/br-skill version 1.0.0 was not found"]
 
     Artifact:
       type: object
@@ -308,6 +319,76 @@ paths:
             application/json:
               schema:
                 type: object
+
+  /activations:
+    get:
+      tags: [Runtime]
+      summary: List namespace activation desired states
+      parameters:
+        - name: namespace
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Desired activations visible to namespace readers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activations:
+                    type: array
+                    items: { type: object }
+
+  /activations/{kind}/{namespace}/{name}/actions:
+    post:
+      tags: [Runtime]
+      summary: Change artifact activation desired state
+      description: Requires namespace maintainer. Actions are install, approve, activate, disable, or rollback. Approval requires passing artifact admission.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: namespace, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [install, approve, activate, disable, rollback] }
+                version: { type: string }
+                reason: { type: string, maxLength: 1000 }
+      responses:
+        "200": { description: Desired state changed }
+        "400": { description: Admission rejected the transition }
+        "403": { description: Namespace maintainer authorization required }
+
+  /activations/{kind}/{namespace}/{name}/status:
+    put:
+      tags: [Runtime]
+      summary: Report observed runtime state
+      description: Runtime controller report; stale generations are rejected.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string } }
+        - { name: namespace, in: path, required: true, schema: { type: string } }
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [observed_state, generation]
+              properties:
+                observed_state: { type: string }
+                generation: { type: integer, format: int64 }
+                last_error: { type: string, maxLength: 2000 }
+      responses:
+        "200": { description: Observed state recorded }
+        "409": { description: Stale generation or invalid report }
 
   /metrics:
     get:
