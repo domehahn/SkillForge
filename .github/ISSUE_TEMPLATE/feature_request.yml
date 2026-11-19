@@ -1,0 +1,32 @@
+name: Feature request
+description: Propose an improvement to SkillForge.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user or operator need is not currently met?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach
+      description: Describe the outcome or behavior you would like.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: textarea
+    id: impact
+    attributes:
+      label: Compatibility or operational impact
+      description: Note API, migration, security, or deployment considerations.
+    validations:
+      required: false
