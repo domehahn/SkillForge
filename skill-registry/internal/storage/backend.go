@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -28,6 +29,8 @@ type Backend interface {
 	Delete(digest string) error
 	// Exists reports whether a blob with the given digest is stored.
 	Exists(digest string) bool
+	// Ping checks whether storage backend is reachable and operating.
+	Ping(ctx context.Context) error
 }
 
 var (

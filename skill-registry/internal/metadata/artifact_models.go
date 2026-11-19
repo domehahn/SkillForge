@@ -3,13 +3,20 @@ package metadata
 import "time"
 
 const (
-	ArtifactKindSkill  = "skill"
-	ArtifactKindAgent  = "agent"
-	ArtifactKindFlow   = "flow"
-	ArtifactKindPrompt = "prompt"
-	ArtifactKindTool   = "tool"
-	ArtifactKindBundle = "bundle"
-	ArtifactKindMCP    = "mcp"
+	ArtifactKindSkill        = "skill"
+	ArtifactKindAgent        = "agent"
+	ArtifactKindFlow         = "flow"
+	ArtifactKindPrompt       = "prompt"
+	ArtifactKindTool         = "tool"
+	ArtifactKindBundle       = "bundle"
+	ArtifactKindMCP          = "mcp"
+	ArtifactKindInstructions = "instructions"
+	ArtifactKindHook         = "hook"
+	ArtifactKindPlugin       = "plugin"
+	ArtifactKindPolicy       = "policy"
+	ArtifactKindContainer    = "container"
+	ArtifactKindModelRuntime = "model-runtime"
+	ArtifactKindModelProfile = "model-profile"
 )
 
 type Artifact struct {
@@ -96,6 +103,13 @@ type ArtifactSpec struct {
 	Steps         []FlowStep             `json:"steps,omitempty" yaml:"steps,omitempty"`
 	Agent         *AgentSpec             `json:"agent,omitempty" yaml:"agent,omitempty"`
 	MCP           *MCPSpec               `json:"mcp,omitempty" yaml:"mcp,omitempty"`
+	Instructions  *InstructionsSpec      `json:"instructions,omitempty" yaml:"instructions,omitempty"`
+	Hook          *HookSpec              `json:"hook,omitempty" yaml:"hook,omitempty"`
+	Plugin        *PluginSpec            `json:"plugin,omitempty" yaml:"plugin,omitempty"`
+	Policy        *PolicySpec            `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Container     *ContainerSpec         `json:"container,omitempty" yaml:"container,omitempty"`
+	ModelRuntime  *ModelRuntimeSpec      `json:"model_runtime,omitempty" yaml:"model_runtime,omitempty"`
+	ModelProfile  *ModelProfileSpec      `json:"model_profile,omitempty" yaml:"model_profile,omitempty"`
 }
 
 type ArtifactDependency struct {
@@ -118,13 +132,13 @@ type FlowStep struct {
 
 // AgentSpec contains typed fields for agent artifacts.
 type AgentSpec struct {
-	Model        string            `json:"model,omitempty" yaml:"model,omitempty"`
-	ModelFamily  string            `json:"model_family,omitempty" yaml:"model_family,omitempty"`
-	SystemPrompt string            `json:"system_prompt,omitempty" yaml:"system_prompt,omitempty"`
-	MaxSteps     int               `json:"max_steps,omitempty" yaml:"max_steps,omitempty"`
+	Model        string             `json:"model,omitempty" yaml:"model,omitempty"`
+	ModelFamily  string             `json:"model_family,omitempty" yaml:"model_family,omitempty"`
+	SystemPrompt string             `json:"system_prompt,omitempty" yaml:"system_prompt,omitempty"`
+	MaxSteps     int                `json:"max_steps,omitempty" yaml:"max_steps,omitempty"`
 	Memory       *AgentMemoryConfig `json:"memory,omitempty" yaml:"memory,omitempty"`
-	Tools        []string          `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Capabilities []string          `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	Tools        []string           `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Capabilities []string           `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 }
 
 type AgentMemoryConfig struct {
@@ -139,10 +153,115 @@ type MCPSpec struct {
 	Command      []string          `json:"command,omitempty" yaml:"command,omitempty"`
 	Args         []string          `json:"args,omitempty" yaml:"args,omitempty"`
 	Env          map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	SecretRefs   map[string]string `json:"secret_refs,omitempty" yaml:"secret_refs,omitempty"`
+	Endpoint     string            `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+	Image        string            `json:"image,omitempty" yaml:"image,omitempty"`
+	Policy       *MCPPolicy        `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Health       *HealthSpec       `json:"health,omitempty" yaml:"health,omitempty"`
 	Tools        []MCPTool         `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Resources    []MCPResource     `json:"resources,omitempty" yaml:"resources,omitempty"`
 	Prompts      []MCPPrompt       `json:"prompts,omitempty" yaml:"prompts,omitempty"`
 	Capabilities MCPCapabilities   `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+}
+
+type MCPPolicy struct {
+	DefaultDeny      bool     `json:"default_deny" yaml:"default_deny"`
+	AllowedTools     []string `json:"allowed_tools,omitempty" yaml:"allowed_tools,omitempty"`
+	DeniedTools      []string `json:"denied_tools,omitempty" yaml:"denied_tools,omitempty"`
+	RequiresApproval []string `json:"requires_approval,omitempty" yaml:"requires_approval,omitempty"`
+	RateLimitPerMin  int      `json:"rate_limit_per_minute,omitempty" yaml:"rate_limit_per_minute,omitempty"`
+	NetworkMode      string   `json:"network_mode,omitempty" yaml:"network_mode,omitempty"`
+	ToolLockDigest   string   `json:"tool_lock_digest,omitempty" yaml:"tool_lock_digest,omitempty"`
+}
+
+type HealthSpec struct {
+	Path            string `json:"path,omitempty" yaml:"path,omitempty"`
+	IntervalSeconds int    `json:"interval_seconds,omitempty" yaml:"interval_seconds,omitempty"`
+	TimeoutSeconds  int    `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
+}
+
+type InstructionsSpec struct {
+	Format          string   `json:"format" yaml:"format"`
+	Scope           string   `json:"scope" yaml:"scope"`
+	TargetPlatforms []string `json:"target_platforms,omitempty" yaml:"target_platforms,omitempty"`
+	TargetPath      string   `json:"target_path" yaml:"target_path"`
+	Precedence      int      `json:"precedence,omitempty" yaml:"precedence,omitempty"`
+	MergeStrategy   string   `json:"merge_strategy,omitempty" yaml:"merge_strategy,omitempty"`
+}
+
+type HookSpec struct {
+	Event            string            `json:"event" yaml:"event"`
+	Matcher          string            `json:"matcher,omitempty" yaml:"matcher,omitempty"`
+	Command          []string          `json:"command,omitempty" yaml:"command,omitempty"`
+	Image            string            `json:"image,omitempty" yaml:"image,omitempty"`
+	Env              map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	SecretRefs       map[string]string `json:"secret_refs,omitempty" yaml:"secret_refs,omitempty"`
+	TimeoutSeconds   int               `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
+	NetworkMode      string            `json:"network_mode,omitempty" yaml:"network_mode,omitempty"`
+	AllowedPaths     []string          `json:"allowed_paths,omitempty" yaml:"allowed_paths,omitempty"`
+	FailurePolicy    string            `json:"failure_policy,omitempty" yaml:"failure_policy,omitempty"`
+	RequiresApproval bool              `json:"requires_approval" yaml:"requires_approval"`
+}
+
+type PluginSpec struct {
+	Protocol         string            `json:"protocol" yaml:"protocol"`
+	Transport        string            `json:"transport" yaml:"transport"`
+	Binary           string            `json:"binary,omitempty" yaml:"binary,omitempty"`
+	Image            string            `json:"image,omitempty" yaml:"image,omitempty"`
+	SHA256           string            `json:"sha256,omitempty" yaml:"sha256,omitempty"`
+	Capabilities     []string          `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
+	Risk             string            `json:"risk,omitempty" yaml:"risk,omitempty"`
+	TimeoutSeconds   int               `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
+	NetworkMode      string            `json:"network_mode,omitempty" yaml:"network_mode,omitempty"`
+	AllowedPaths     []string          `json:"allowed_paths,omitempty" yaml:"allowed_paths,omitempty"`
+	SecretRefs       map[string]string `json:"secret_refs,omitempty" yaml:"secret_refs,omitempty"`
+	RequiresApproval bool              `json:"requires_approval" yaml:"requires_approval"`
+}
+
+type PolicySpec struct {
+	Engine     string `json:"engine" yaml:"engine"`
+	Mode       string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	Entrypoint string `json:"entrypoint,omitempty" yaml:"entrypoint,omitempty"`
+	FailClosed bool   `json:"fail_closed" yaml:"fail_closed"`
+}
+
+type ContainerSpec struct {
+	Image       string            `json:"image" yaml:"image"`
+	Command     []string          `json:"command,omitempty" yaml:"command,omitempty"`
+	Args        []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	SecretRefs  map[string]string `json:"secret_refs,omitempty" yaml:"secret_refs,omitempty"`
+	Ports       []int             `json:"ports,omitempty" yaml:"ports,omitempty"`
+	ReadOnly    bool              `json:"read_only" yaml:"read_only"`
+	NetworkMode string            `json:"network_mode,omitempty" yaml:"network_mode,omitempty"`
+	MemoryMB    int               `json:"memory_mb,omitempty" yaml:"memory_mb,omitempty"`
+	CPUs        float64           `json:"cpus,omitempty" yaml:"cpus,omitempty"`
+	GPUs        int               `json:"gpus,omitempty" yaml:"gpus,omitempty"`
+	Health      *HealthSpec       `json:"health,omitempty" yaml:"health,omitempty"`
+}
+
+type ModelRuntimeSpec struct {
+	Engine      string            `json:"engine" yaml:"engine"`
+	Image       string            `json:"image" yaml:"image"`
+	API         string            `json:"api,omitempty" yaml:"api,omitempty"`
+	Port        int               `json:"port,omitempty" yaml:"port,omitempty"`
+	Args        []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	SecretRefs  map[string]string `json:"secret_refs,omitempty" yaml:"secret_refs,omitempty"`
+	MemoryMB    int               `json:"memory_mb,omitempty" yaml:"memory_mb,omitempty"`
+	GPUs        int               `json:"gpus,omitempty" yaml:"gpus,omitempty"`
+	NetworkMode string            `json:"network_mode,omitempty" yaml:"network_mode,omitempty"`
+	Health      *HealthSpec       `json:"health,omitempty" yaml:"health,omitempty"`
+}
+
+type ModelProfileSpec struct {
+	Runtime       ArtifactDependency `json:"runtime" yaml:"runtime"`
+	ModelID       string             `json:"model_id" yaml:"model_id"`
+	Family        string             `json:"family,omitempty" yaml:"family,omitempty"`
+	Quantization  string             `json:"quantization,omitempty" yaml:"quantization,omitempty"`
+	ContextWindow int                `json:"context_window,omitempty" yaml:"context_window,omitempty"`
+	License       string             `json:"license,omitempty" yaml:"license,omitempty"`
+	Parameters    map[string]any     `json:"parameters,omitempty" yaml:"parameters,omitempty"`
 }
 
 type MCPTool struct {
@@ -238,4 +357,47 @@ type Attestation struct {
 	Predicate         map[string]interface{} `json:"predicate,omitempty"`
 	CreatedBy         string                 `json:"created_by"`
 	CreatedAt         time.Time              `json:"created_at"`
+}
+
+const (
+	ActivationStateDiscovered = "discovered"
+	ActivationStateInstalled  = "installed"
+	ActivationStateApproved   = "approved"
+	ActivationStateActive     = "active"
+	ActivationStateDisabled   = "disabled"
+	ActivationStateFailed     = "failed"
+	ActivationStateRollback   = "rollback"
+)
+
+// Activation is desired state only. A separate runtime controller owns any
+// side effect and reports observed state back to the registry.
+type Activation struct {
+	ID              int64      `json:"id"`
+	Namespace       string     `json:"namespace"`
+	Kind            string     `json:"kind"`
+	Name            string     `json:"name"`
+	Version         string     `json:"version"`
+	PreviousVersion string     `json:"previous_version,omitempty"`
+	DesiredState    string     `json:"desired_state"`
+	ObservedState   string     `json:"observed_state"`
+	Generation      int64      `json:"generation"`
+	ApprovedBy      string     `json:"approved_by,omitempty"`
+	ApprovedAt      *time.Time `json:"approved_at,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	LastError       string     `json:"last_error,omitempty"`
+	CreatedBy       string     `json:"created_by"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type ActivationEvent struct {
+	ID           int64     `json:"id"`
+	ActivationID int64     `json:"activation_id"`
+	Generation   int64     `json:"generation"`
+	Action       string    `json:"action"`
+	Actor        string    `json:"actor"`
+	FromState    string    `json:"from_state"`
+	ToState      string    `json:"to_state"`
+	Reason       string    `json:"reason,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
