@@ -71,6 +71,7 @@ func main() {
 
 	// Initialize registry
 	reg := registry.NewRegistry(repo, store, validator, logger)
+	reg.SetWebhookSigningKey(cfg.Security.WebhookSigningKey)
 
 	// Initialize authenticator
 	authenticator, err := auth.NewAuthenticatorWithBcryptCost(cfg.Auth.Enabled, repo.GetDB(), cfg.Auth.BcryptCost)
@@ -141,6 +142,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize rate limiter: %v", err)
 		}
+		handler.SetRateLimitBackend(backend)
 		limiter := ratelimit.New(backend, cfg.Security.TrustedProxies, logger)
 		r.Use(ratelimit.Middleware(limiter))
 	}
@@ -155,6 +157,7 @@ func main() {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	// Start server in a goroutine
@@ -182,6 +185,7 @@ func main() {
 			redirect := &http.Server{
 				Addr:              httpAddr,
 				ReadHeaderTimeout: 10 * time.Second,
+				MaxHeaderBytes:    1 << 20,
 				Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					target := "https://" + r.Host + r.URL.RequestURI()
 					http.Redirect(w, r, target, http.StatusMovedPermanently)

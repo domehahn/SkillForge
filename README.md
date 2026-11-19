@@ -1,28 +1,64 @@
 # SkillForge
 
-[![CI](https://github.com/YOUR_ORG/SkillForge/workflows/skill-registry/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/skill-registry.yml)
-[![Frontend](https://github.com/YOUR_ORG/SkillForge/workflows/frontend/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/frontend.yml)
-[![Integration Tests](https://github.com/YOUR_ORG/SkillForge/workflows/integration-tests/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/integration-tests.yml)
-[![CodeQL](https://github.com/YOUR_ORG/SkillForge/workflows/codeql/badge.svg)](https://github.com/YOUR_ORG/SkillForge/actions/workflows/codeql.yml)
+[![Registry CI](https://github.com/domehahn/SkillForge/actions/workflows/skill-registry.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/skill-registry.yml)
+[![Frontend CI](https://github.com/domehahn/SkillForge/actions/workflows/frontend.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/frontend.yml)
+[![Integration Tests](https://github.com/domehahn/SkillForge/actions/workflows/integration-tests.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/integration-tests.yml)
+[![CodeQL](https://github.com/domehahn/SkillForge/actions/workflows/codeql.yml/badge.svg)](https://github.com/domehahn/SkillForge/actions/workflows/codeql.yml)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/domehahn/SkillForge/blob/main/LICENSE)
 
-SkillForge is a self-hosted registry server for immutable AI Agent Skill artifacts.
+SkillForge is a self-hosted package registry for AI development assets. Publish, version, discover, and distribute reusable agent packages from infrastructure you control. Packages are immutable, validated, digest-addressed, and governed by namespace permissions and an auditable release history.
 
 Use `skcr` to scaffold and render local agent/project structures.
 Use `skpm` to validate, package, publish, install, lock, update, and verify skills.
 Use `skil` to scan skills for security issues and produce attestable evidence.
-Use SkillForge as the self-hosted registry server for immutable skill artifacts.
+Use SkillForge as the self-hosted package registry for immutable AI artifacts.
 Use `skforge` for SkillForge-specific administration, governance, and debugging.
 
-This repository contains `skill-registry/`, the registry server implementation:
+The registry data model supports skills, agents, workflows, prompts, tools, bundles, MCP servers, instruction files, hooks, plugins, policies, containers, and local model runtime/profile definitions. `skpm` currently provides the consumer package lifecycle for skills. Runtime activation is represented as audited desired state; a separate controller is responsible for starting and supervising workloads.
+
+This repository contains `skill-registry/`, the registry server, CLI, API, and web application:
 
 - registry server
 - REST API
 - Web UI
 - `skforge` admin CLI
-- content-addressable package storage
-- SQLite metadata
+- content-addressable filesystem or S3-compatible package storage
+- SQLite or PostgreSQL metadata
 - token authentication
 - governance workflows (deprecate, yank, unyank, delete)
+
+## Quick start
+
+```bash
+cd skill-registry
+make build
+./bin/skill-registry
+```
+
+The server binds to `127.0.0.1:8080` by default. Check readiness with
+`curl http://localhost:8080/readyz`. For a containerized setup, see
+[`skill-registry/README.md`](skill-registry/README.md#docker).
+
+## Project map
+
+| Path | Purpose |
+| --- | --- |
+| `skill-registry/internal/api` | HTTP routes, handlers, OpenAPI contract |
+| `skill-registry/internal/registry` | Artifact lifecycle and policy decisions |
+| `skill-registry/internal/metadata` | Persistence models and repository |
+| `skill-registry/internal/storage` | Filesystem and S3-compatible package storage |
+| `skill-registry/web` | React/Vite registry interface |
+| `skill-registry/cmd` | Registry server and `skforge` CLI |
+| `.github/workflows` | CI, security, integration, and release workflows |
+
+## Project documentation
+
+- [Registry setup and CLI](skill-registry/README.md)
+- [Artifact formats and lifecycle](skill-registry/docs/ARTIFACTS.md)
+- [Backup and restore](skill-registry/docs/BACKUP_RESTORE.md)
+- [Production deployment](skill-registry/docs/PRODUCTION_DEPLOYMENT.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security reporting](SECURITY.md)
 
 ## Responsibility Boundary
 
@@ -193,3 +229,12 @@ Skills can run commands, read context, write files, or influence agent behavior.
 ## Roadmap Boundaries
 
 The product boundary is fixed: SkillForge stores and serves versioned artifacts; `skpm` manages the consumer lifecycle; `skcr` renders local project structures. SkillForge will not absorb consumer-side packaging, lockfile management, or install workflows.
+
+### Registry priorities
+
+1. **Upstream registries and local caching.** Skill API requests can fetch configured registries on cache miss, verify metadata and package digests, and retain immutable copies. Generic artifact proxying, failure caching, and deployment egress allowlists remain open.
+2. **A consistent package experience across artifact types.** Document and stabilize publish, search, resolve, download, and version behavior for the supported AI artifact types; provide client support where an artifact format needs it. Generic artifact storage does not by itself mean every client can consume every type.
+3. **Verifiable package provenance.** Ed25519 artifact and scan attestations are verified against use-scoped deployment trust keys before status changes or activation. Remote upstream signatures are not imported as verified; broader provenance formats and key lifecycle automation remain open.
+4. **Operational proof.** Exercise backup and restore against a real deployment, and define deployment-specific monitoring, alerting, rollback, and recovery targets before relying on the registry for critical distribution.
+
+Starting or supervising agent containers, executing MCP servers, and rendering files into every agent platform remain outside the registry server's scope. Those responsibilities belong to dedicated clients and runtime controllers.

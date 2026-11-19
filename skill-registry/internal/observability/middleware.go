@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/skillforge/skill-registry/internal/auth"
 )
 
 // RequestIDMiddleware adds a unique request ID to each request
@@ -36,11 +38,14 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 			duration := time.Since(start)
 
 			logCtx := LoggerWithContext(logger, r.Context())
+			actor := auth.ActorFromContext(r.Context())
 			logCtx.Info("http_request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", wrapped.statusCode,
 				"duration_ms", duration.Milliseconds(),
+				"latency_ms", duration.Milliseconds(),
+				"actor", actor,
 				"remote_addr", r.RemoteAddr,
 			)
 		})

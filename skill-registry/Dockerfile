@@ -8,7 +8,7 @@ COPY skill-registry/web/ ./
 RUN npm run build
 
 # Build Go binaries
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27.4-alpine AS builder
 
 RUN apk add --no-cache git make gcc musl-dev sqlite-dev
 
