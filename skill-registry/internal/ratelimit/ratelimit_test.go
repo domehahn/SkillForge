@@ -19,6 +19,10 @@ func (f *fakeBackend) Allow(_ context.Context, key string) (bool, error) {
 	return f.allow, f.err
 }
 
+func (f *fakeBackend) Ping(_ context.Context) error {
+	return nil
+}
+
 func TestLimiterPrefersAuthTokenOverIP(t *testing.T) {
 	backend := &fakeBackend{allow: true}
 	l := New(backend, nil, nil)

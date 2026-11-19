@@ -24,6 +24,7 @@ type Config struct {
 	Proxy      ProxyConfig      `yaml:"proxy"`
 	Validation ValidationConfig `yaml:"validation"`
 	RateLimit  RateLimitConfig  `yaml:"rate_limit"`
+	Activation ActivationConfig `yaml:"activation"`
 }
 
 // TLSConfig holds TLS configuration
@@ -83,6 +84,13 @@ type SecurityConfig struct {
 	// audit-logged and rate-limited identity by just setting the header
 	// itself.
 	TrustedProxies []string `yaml:"trusted_proxies"`
+	// WebhookSigningKey is environment-only and is never serialized to config.
+	WebhookSigningKey string `yaml:"-"`
+}
+
+type ActivationConfig struct {
+	Enabled                   bool `yaml:"enabled"`
+	RequireVerifiedSignatures bool `yaml:"require_verified_signatures"`
 }
 
 // StorageConfig holds storage configuration
@@ -229,6 +237,7 @@ func DefaultConfig() *Config {
 			RequestsPerMinute: 300,
 			Backend:           "memory",
 		},
+		Activation: ActivationConfig{Enabled: true},
 	}
 }
 
@@ -344,6 +353,15 @@ func applyEnvOverrides(cfg *Config) {
 			}
 		}
 		cfg.Security.TrustedProxies = proxies
+	}
+	if v := os.Getenv("SKILL_REGISTRY_WEBHOOK_SIGNING_KEY"); v != "" {
+		cfg.Security.WebhookSigningKey = v
+	}
+	if v := os.Getenv("SKILL_REGISTRY_ACTIVATION_ENABLED"); v != "" {
+		cfg.Activation.Enabled = strings.ToLower(v) == "true" || v == "1"
+	}
+	if v := os.Getenv("SKILL_REGISTRY_ACTIVATION_REQUIRE_VERIFIED_SIGNATURES"); v != "" {
+		cfg.Activation.RequireVerifiedSignatures = strings.ToLower(v) == "true" || v == "1"
 	}
 	if v := os.Getenv("SKILL_REGISTRY_EMAIL_SMTP_ENABLED"); v != "" {
 		cfg.Email.SMTPEnabled = strings.ToLower(v) == "true" || v == "1"

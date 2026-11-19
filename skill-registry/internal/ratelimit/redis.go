@@ -48,3 +48,10 @@ func (b *RedisBackend) Allow(ctx context.Context, key string) (bool, error) {
 	}
 	return count <= int64(b.rate), nil
 }
+
+func (b *RedisBackend) Ping(ctx context.Context) error {
+	if err := b.client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("ratelimit: redis: %w", err)
+	}
+	return nil
+}
